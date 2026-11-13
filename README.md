@@ -55,7 +55,7 @@ git tag v25.12.2 && git push origin v25.12.2
 
 ```bash
 VERSION=25.12.2 PROXY_PROFILE=passwall bash scripts/build.sh
-# 产物在 dist/images/、dist/SHA256SUMS、dist/BUILDINFO
+# 产物在 dist/images/、dist/SHA256SUMS-<ver>-x86_64-<profile>.txt、dist/BUILDINFO-<ver>-x86_64-<profile>.txt
 ```
 
 macOS 不能直接跑：ImageBuilder 是 Linux x86_64 二进制。本机需要 Linux 或容器。
@@ -68,8 +68,8 @@ dist/images/immortalwrt-25.12.2-x86_64-passwall-squashfs-combined.img.gz
 dist/images/immortalwrt-25.12.2-x86_64-passwall-ext4-combined-efi.img.gz
 dist/images/immortalwrt-25.12.2-x86_64-passwall-*.qcow2 / *.vmdk / *.vdi
 dist/images/immortalwrt-25.12.2-x86_64-passwall.manifest
-dist/SHA256SUMS
-dist/BUILDINFO        # 版本、包列表、ImageBuilder 校验和、commit、run id
+dist/SHA256SUMS-25.12.2-x86_64-passwall.txt
+dist/BUILDINFO-25.12.2-x86_64-passwall.txt   # 版本、包列表、IB 校验和、commit、run id
 ```
 
 写盘：

@@ -105,9 +105,10 @@ if [[ -f "$MANIFEST" ]]; then
 fi
 
 log "writing metadata"
+META_BASE="${VERSION}-x86_64-${PROXY_PROFILE}"
 (
   cd "$OUTDIR/images"
-  sha256sum ./* > ../SHA256SUMS
+  sha256sum -- * > "$OUTDIR/SHA256SUMS-${META_BASE}.txt"
 )
 GIT_SHA="${GITHUB_SHA:-$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)}"
 {
@@ -123,7 +124,7 @@ GIT_SHA="${GITHUB_SHA:-$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null 
   echo "run_id=${GITHUB_RUN_ID:-local}"
   echo "run_url=${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-local}/actions/runs/${GITHUB_RUN_ID:-0}"
   echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-} > "$OUTDIR/BUILDINFO"
+} > "$OUTDIR/BUILDINFO-${META_BASE}.txt"
 
 log "done: $(find "$OUTDIR/images" -maxdepth 1 -type f | wc -l | tr -d ' ') files in $OUTDIR/images"
-cat "$OUTDIR/BUILDINFO"
+cat "$OUTDIR/BUILDINFO-${META_BASE}.txt"

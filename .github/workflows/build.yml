@@ -79,7 +79,8 @@ jobs:
       - name: Show results
         run: |
           ls -lh dist/images
-          cat dist/BUILDINFO
+          cat dist/BUILDINFO-*.txt
+          cat dist/SHA256SUMS-*.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: firmware-${{ needs.plan.outputs.version }}-x86_64-${{ matrix.proxy }}
@@ -98,10 +99,10 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
-      - name: Rebuild checksum index
+      - name: Index all assets
         run: |
           cd artifacts
-          sha256sum ./* | grep -v 'SHA256SUMS' > SHA256SUMS || true
+          find . -type f ! -name 'SHA256SUMS.txt' -exec sha256sum {} + | sort -k2 > SHA256SUMS.txt
           ls -lh
       - name: Publish release
         env:
@@ -118,4 +119,4 @@ jobs:
               --notes "Automated ImageBuilder build. See BUILDINFO / SHA256SUMS for provenance. Not hardware-tested." \
               || gh release view "$TAG" >/dev/null
           fi
-          gh release upload "$TAG" artifacts/* --clobber
+          find artifacts -type f -print0 | xargs -0 gh release upload "$TAG" --clobber
