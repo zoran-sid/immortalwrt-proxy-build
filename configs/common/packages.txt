@@ -1,0 +1,11 @@
+# Base packages for every profile. One package per line, # starts a comment.
+luci
+luci-ssl
+dnsmasq-full
+curl
+ca-bundle
+kmod-tun
+kmod-nft-tproxy
+nftables
+conntrack
+tcpdump

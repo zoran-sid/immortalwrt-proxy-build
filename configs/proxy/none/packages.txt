@@ -1,0 +1,1 @@
+# No proxy frontend. Baseline image for A/B comparison and recovery.

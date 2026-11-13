@@ -1,0 +1,9 @@
+dist/
+.work/
+*.img.gz
+*.qcow2
+*.vmdk
+*.vdi
+*.vhdx
+*.log
+.DS_Store

@@ -1,0 +1,53 @@
+name: validate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install shellcheck
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends shellcheck python3-yaml
+      - name: Shellcheck
+        run: |
+          mapfile -t files < <(find scripts -type f -name '*.sh' | sort)
+          printf '%s\n' "${files[@]}"
+          shellcheck -x "${files[@]}"
+      - name: YAML parses
+        run: |
+          python3 - <<'PY'
+          import glob, sys, yaml
+          bad = 0
+          for f in glob.glob('.github/workflows/*.yml') + glob.glob('targets/*.yml'):
+              try:
+                  yaml.safe_load(open(f))
+                  print(f'ok   {f}')
+              except Exception as e:
+                  bad = 1
+                  print(f'FAIL {f}: {e}')
+          sys.exit(bad)
+          PY
+      - name: Package lists are sanity-checked
+        run: |
+          set -e
+          for d in configs/common configs/proxy/*; do
+            test -f "$d/packages.txt" || { echo "missing $d/packages.txt"; exit 1; }
+          done
+          for p in passwall openclash homeproxy; do
+            grep -q '^luci-app-' "configs/proxy/$p/packages.txt" || { echo "$p: no luci-app entry"; exit 1; }
+          done
+          echo "package lists ok"
+      - name: Upstream release is reachable
+        run: |
+          set -e
+          V=25.12.2
+          curl -fsS --retry 2 -o /dev/null -w '%{http_code}\n' \
+            "https://downloads.immortalwrt.org/releases/$V/targets/x86/64/sha256sums"

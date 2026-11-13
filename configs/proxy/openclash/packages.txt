@@ -1,0 +1,3 @@
+# OpenClash (vernesong) — resolved from the ImmortalWrt luci feed.
+# Needs bash/iptables/kmod-tun/dnsmasq-full; ImageBuilder pulls them via deps.
+luci-app-openclash

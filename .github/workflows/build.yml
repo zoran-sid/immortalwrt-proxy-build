@@ -1,0 +1,119 @@
+name: build-firmware
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "ImmortalWrt release (e.g. 25.12.2 or 24.10.6)"
+        required: true
+        default: "25.12.2"
+      proxy:
+        description: "Proxy profile"
+        type: choice
+        options: [passwall, openclash, homeproxy, none]
+        default: passwall
+      release:
+        description: "Publish a GitHub Release with the artifacts"
+        type: boolean
+        default: false
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}-${{ inputs.proxy || 'matrix' }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+      - id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_PROXY: ${{ inputs.proxy }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$EVENT" = "push" ]; then
+            printf 'matrix=["passwall","openclash","none"]\n' >> "$GITHUB_OUTPUT"
+            printf 'version=%s\n' "${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            printf 'matrix=["%s"]\n' "$INPUT_PROXY" >> "$GITHUB_OUTPUT"
+            printf 'version=%s\n' "$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+          fi
+      - run: cat "$GITHUB_OUTPUT" || true
+
+  build:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        proxy: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: x86_64 / ${{ matrix.proxy }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Runner resources
+        run: |
+          set -x
+          df -h /
+          free -h
+          nproc
+          uname -a
+      - name: Install tools
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends zstd
+      - name: Build with ImageBuilder
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+          TARGET: x86/64
+          PROFILE: generic
+          PROXY_PROFILE: ${{ matrix.proxy }}
+          ROOTFS_PARTSIZE: "1024"
+        run: bash scripts/build.sh
+      - name: Show results
+        run: |
+          ls -lh dist/images
+          cat dist/BUILDINFO
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: firmware-${{ needs.plan.outputs.version }}-x86_64-${{ matrix.proxy }}
+          path: dist/**
+          retention-days: 14
+          if-no-files-found: error
+
+  release:
+    needs: [plan, build]
+    if: github.event_name == 'push' || inputs.release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Rebuild checksum index
+        run: |
+          cd artifacts
+          sha256sum ./* | grep -v 'SHA256SUMS' > SHA256SUMS || true
+          ls -lh
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.plan.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG exists, uploading assets"
+          else
+            gh release create "$TAG" \
+              --title "ImmortalWrt $TAG (x86-64)" \
+              --notes "Automated ImageBuilder build. See BUILDINFO / SHA256SUMS for provenance. Not hardware-tested."
+          fi
+          gh release upload "$TAG" artifacts/* --clobber

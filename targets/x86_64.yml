@@ -1,0 +1,13 @@
+# Target descriptor for the x86-64 image.
+# ImmortalWrt ships a prebuilt ImageBuilder for this target, so no source compile
+# is required and a build finishes in minutes instead of hours.
+name: x86-64
+architecture: x86_64
+target: x86/64
+profile: generic
+imagebuilder: immortalwrt-imagebuilder-${version}-x86-64.Linux-x86_64.tar.zst
+base_url: https://downloads.immortalwrt.org/releases/${version}/targets/x86/64
+boot: UEFI + legacy BIOS
+known_nics: Intel/Realtek 1G–2.5G, virtio-net
+minimum_ram_mb: 1024
+tested: build-only
