@@ -107,6 +107,22 @@ scripts/diagnostics/            # 只读诊断
 .github/workflows/validate.yml  # shellcheck / YAML / 包清单检查
 ```
 
+## 本次验证记录（2026-11-13）
+
+| 项 | 结果 |
+|---|---|
+| 上游版本核实 | 25.12.2 为 current stable（2026-09-06 发布），24.10.6 为 old stable（2026-04-26） |
+| 包管理器 | 25.12 用 apk（`.apk` / `index.json`），24.10 用 opkg |
+| 构建 | passwall / openclash / homeproxy 三个 profile 全部成功 |
+| 产物 | 12 个镜像格式/profile（img.gz、qcow2、vdi、vmdk、vhdx、iso） |
+| 校验 | `sha256sum -c` 对已下载镜像验证通过 |
+| manifest | 从构建 rootfs 的 apk 数据库生成，passwall profile 共 309 个包 |
+| 未验证 | 启动、联网、IPv6、真机、24–72h 稳定性 |
+
+Feed 里锁定的插件版本是 `luci-app-passwall 26.10.29-r1`、`luci-app-openclash 0.48.002`、
+`luci-app-homeproxy 26.298.29275`、`xray-core 26.10.21-r1`、`sing-box 1.12.25-r1`。
+上游项目最新 tag 可能比这更新，但 25.12.2 这个 release 只保证这一组可用。
+
 ## 未完成 / 已知限制
 
 - **没有真机测试**：CI 只证明镜像能构建出来，不证明能启动、能上网。
