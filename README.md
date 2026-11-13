@@ -95,6 +95,11 @@ sh /root/network-doctor.sh --redact-node-ip
 输出会给出类似 `DNS_LOCAL_FAILURE`、`FIREWALL_RULE_MISSING`、`IPV6_PROXY_BYPASS`
 的分类，而不是一句"网络异常"。详见 [docs/troubleshooting.md](docs/troubleshooting.md)。
 
+## 交接
+
+后续由其他 agent 接手时先读 [AGENTS.md](AGENTS.md)：里面有已验证/未验证的界限、
+已经踩过的坑、不变量和下一步的验收标准。Claude Code 通过 `CLAUDE.md` 自动加载同一份内容。
+
 ## 仓库结构
 
 ```
