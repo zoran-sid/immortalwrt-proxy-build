@@ -114,6 +114,7 @@ jobs:
           else
             gh release create "$TAG" \
               --title "ImmortalWrt $TAG (x86-64)" \
-              --notes "Automated ImageBuilder build. See BUILDINFO / SHA256SUMS for provenance. Not hardware-tested."
+              --notes "Automated ImageBuilder build. See BUILDINFO / SHA256SUMS for provenance. Not hardware-tested." \
+              || gh release view "$TAG" >/dev/null
           fi
           gh release upload "$TAG" artifacts/* --clobber
