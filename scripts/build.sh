@@ -47,7 +47,9 @@ if [[ ! -s "$IB_NAME" ]]; then
   curl -fL --retry 3 --retry-delay 3 -o "$IB_NAME" "$BASE_URL/$IB_NAME" \
     || die "cannot download $IB_NAME"
 fi
-grep -F " $IB_NAME" sha256sums > ib.sha256 || die "no checksum entry for $IB_NAME"
+# sha256sums lists "<hash> *<file>" (binary marker) on ImmortalWrt downloads.
+awk -v n="$IB_NAME" '$2 == n || $2 == "*" n { print $1 "  " n }' sha256sums > ib.sha256
+[[ -s ib.sha256 ]] || die "no checksum entry for $IB_NAME"
 sha256sum -c ib.sha256 || die "ImageBuilder checksum mismatch"
 
 log "extracting ImageBuilder"
@@ -123,5 +125,5 @@ GIT_SHA="${GITHUB_SHA:-$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null 
   echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } > "$OUTDIR/BUILDINFO"
 
-log "done: $(ls -1 "$OUTDIR/images" | wc -l | tr -d ' ') files in $OUTDIR/images"
+log "done: $(find "$OUTDIR/images" -maxdepth 1 -type f | wc -l | tr -d ' ') files in $OUTDIR/images"
 cat "$OUTDIR/BUILDINFO"
