@@ -67,7 +67,7 @@ jobs:
           nproc
           uname -a
       - name: Install tools
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends zstd qemu-utils
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends zstd qemu-utils genisoimage
       - name: Build with ImageBuilder
         env:
           VERSION: ${{ needs.plan.outputs.version }}
