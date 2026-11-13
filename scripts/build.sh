@@ -99,9 +99,20 @@ for f in "$BIN_DIR"/*.img.gz "$BIN_DIR"/*.qcow2 "$BIN_DIR"/*.vmdk \
 done
 (( copied > 0 )) || die "no comparable images produced"
 
-MANIFEST="$BIN_DIR/immortalwrt-${VERSION}-${TARGET_DASH}.manifest"
-if [[ -f "$MANIFEST" ]]; then
-  cp -f "$MANIFEST" "$OUTDIR/images/immortalwrt-${VERSION}-x86_64-${PROXY_PROFILE}.manifest"
+# `make image` does not emit a package manifest, but the assembled rootfs is
+# still on disk; read the installed-package database out of it directly.
+MANIFEST_OUT="$OUTDIR/images/immortalwrt-${VERSION}-x86_64-${PROXY_PROFILE}.manifest"
+ROOTFS_DIR="$(find "$IB_DIR/build_dir" -maxdepth 2 -type d -name 'root-*' 2>/dev/null | head -1)"
+if [[ -n "$ROOTFS_DIR" && -f "$ROOTFS_DIR/lib/apk/db/installed" ]]; then
+  awk -F: '/^P:/{n=substr($0,3)} /^V:/{if (n!="") {print n " - " substr($0,3); n=""}}' \
+    "$ROOTFS_DIR/lib/apk/db/installed" | sort > "$MANIFEST_OUT"
+elif [[ -n "$ROOTFS_DIR" && -f "$ROOTFS_DIR/usr/lib/opkg/status" ]]; then
+  awk -F': ' '/^Package:/{p=$2} /^Version:/{if (p!="") {print p " - " $2; p=""}}' \
+    "$ROOTFS_DIR/usr/lib/opkg/status" | sort > "$MANIFEST_OUT"
+elif [[ -f "$BIN_DIR/immortalwrt-${VERSION}-${TARGET_DASH}.manifest" ]]; then
+  cp -f "$BIN_DIR/immortalwrt-${VERSION}-${TARGET_DASH}.manifest" "$MANIFEST_OUT"
+else
+  echo "WARN: no package manifest could be produced" >&2
 fi
 
 log "writing metadata"

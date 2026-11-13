@@ -99,11 +99,8 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
-      - name: Index all assets
-        run: |
-          cd artifacts
-          find . -type f ! -name 'SHA256SUMS.txt' -exec sha256sum {} + | sort -k2 > SHA256SUMS.txt
-          ls -lh
+      - name: List assets
+        run: ls -lh artifacts
       - name: Publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -116,7 +113,7 @@ jobs:
           else
             gh release create "$TAG" \
               --title "ImmortalWrt $TAG (x86-64)" \
-              --notes "Automated ImageBuilder build. See BUILDINFO / SHA256SUMS for provenance. Not hardware-tested." \
+              --notes "Automated ImageBuilder build (x86-64). Per-profile BUILDINFO and SHA256SUMS assets record provenance; images are not hardware-tested." \
               || gh release view "$TAG" >/dev/null
           fi
           find artifacts -type f -print0 | xargs -0 gh release upload "$TAG" --clobber
