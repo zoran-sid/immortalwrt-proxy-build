@@ -83,11 +83,17 @@ class ResolverTests(unittest.TestCase):
         self.assertIn("monitor-lite", p["modules"])
         self.assertLess(p["modules"].index("monitor-lite"), p["modules"].index("monitor-pro"))
 
-    def test_thirdparty_module_resolves_with_lock(self):
-        p = plan("x86-64", "custom", "base,proxy-nikki")
-        names = [e["name"] for e in p["thirdparty_repos"]]
-        self.assertIn("nikki", names)
-        self.assertTrue(p["packages"])
+    def test_blocked_thirdparty_module_is_rejected(self):
+        # Nikki stays blocked until the local apk index can be signed; see AGENTS.md
+        res = run("check", "--target", "x86-64", "--preset", "custom",
+                  "--modules", "base,proxy-nikki")
+        self.assertEqual(res.returncode, 2)
+        self.assertIn("blocked", res.stderr)
+
+    def test_binary_thirdparty_module_resolves(self):
+        p = plan("x86-64", "custom", "base,proxy-openclash")
+        names = [e["name"] for e in p["thirdparty_binaries"]]
+        self.assertIn("mihomo-core", names)
 
     def test_standard_preset_contains_expected_proxy_default(self):
         self.assertEqual(plan("x86-64", "standard")["proxy_default"], "passwall")

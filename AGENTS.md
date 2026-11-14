@@ -23,9 +23,9 @@
 | 项 | 状态 |
 |---|---|
 | 结构重构（targets/modules/presets/resolve/build/workflows） | ✅ 已完成 |
-| 解析器单测（13 项：冲突/目标限制/requires/hash/矩阵） | ✅ 本地通过 |
+| 解析器单测（14 项：冲突/目标限制/requires/hash/矩阵/binary 第三方） | ✅ 本地通过 |
 | 包名核实（x86_64 / aarch64_cortex-a53 / aarch64_generic） | ✅ 逐包核对过 feed |
-| 重构后首次 CI 构建 | ⏳ 本轮只触发 1 次，结果看 Actions |
+| 重构后 CI 构建 | ⚠️ 3 次均失败于第三方索引签名（详见 §7.14）；去掉 Nikki 后待复验 |
 | 已有 25.12.2 旧结构产物（passwall/openclash/homeproxy） | ✅ Release `25.12.2` 里仍可下载 |
 | 向导 UI / proxy-guard / Nikki on ARM | ❌ **未真机验证** |
 | QEMU 冒烟 / IPv6 / soak | ❌ 未做 |
@@ -100,7 +100,8 @@ custom 构建的 preset 是 `custom-<sha256(排序模块列表)[:8]>`。
 - 没有 `nftables` 包（是 `nftables-json`）；没有 `acme`（是 `acme-acmesh`）；
   没有 `luci-app-mosdns`（只有 `mosdns` 核心）。
 - ARM profile 名：`glinet_gl-mt2500`、`glinet_gl-mt2500-airoha`、`friendlyarm_nanopi-r5s/r6s/r76s`。
-- 第三方：Nikki v1.26.2 提供 25.12 apk 仓库（三种 arch）；mihomo v1.19.34 有 amd64/arm64 二进制；
+- 第三方：Nikki v1.26.2 提供 25.12 apk 仓库（三种 arch）但当前 **blocked**（索引签名）；
+  mihomo v1.19.34 有 amd64/arm64 二进制（overlay 注入可用）；
   EasyTier 没有 25.12 ABI 资产（blocked）。
 
 ## 7. 踩过的坑（别重犯）
@@ -128,6 +129,11 @@ custom 构建的 preset 是 `custom-<sha256(排序模块列表)[:8]>`。
 12. **新增**：`build.sh` 里 `cd "$IB_DIR"` 之后不能用相对路径读 `$WORKDIR` 的文件，
     IB 校验和要提前存进变量。
 13. **新增**：`custom-<hash>` 预设必须能被再次解析（resolve 把 `custom-*` 当 custom 处理）。
+14. **未解决**：Nikki 的 apk 进了 `packages/` 并重建索引后，apk 仍报
+    `UNTRUSTED signature` 且只认官方包。`CONFIG_SIGNATURE_CHECK=` 传进 make 也没用
+    （run 43551246458）。下一步要么用 openssl 生成构建密钥 + `apk mkndx --sign` +
+    公钥放进 `$IB_DIR/keys/`，要么等上游给出第三方包的签名方案。在此之前
+    `proxy-nikki` 保持 `blocked`，不要加回预设。
 
 ## 8. 改动指南
 
@@ -165,13 +171,14 @@ manifest 解析这些假设都要复核。
 
 ## 10. 未完成 / 下一步（按价值）
 
-1. **首次 CI 构建验证**：14 个组合里先跑 x86-64/standard、gl-mt2500/lite、nanopi-r6s/standard。
+1. **CI 构建复验**：先去跑 x86-64/standard 与 gl-mt2500/lite（Nikki 已移出预设）。
    验收：镜像、manifest、SHA256SUMS、BUILDINFO 齐全，`sha256sum -c` 通过。
-2. **QEMU 冒烟**：x86 镜像无头启动，断言 ubus、dnsmasq、firewall4、代理前端服务存在。
-3. **proxy-guard 行为测试**：人为断网验证 fail-open 切换与恢复，检查 nftables 残留。
-4. **向导真机走查**：四个场景各跑一遍，确认 90 秒回滚真的生效。
-5. **IPv6 路径测试**：v4/v6 的 DNS、tproxy、route 分别断言。
-6. **soak**：start/stop/restart × 100，确认无重复核心进程、规则不重复追加。
+2. **给本地 apk 索引签名**（恢复 Nikki 的前置条件，见 §7.14）。
+3. **QEMU 冒烟**：x86 镜像无头启动，断言 ubus、dnsmasq、firewall4、代理前端服务存在。
+4. **proxy-guard 行为测试**：人为断网验证 fail-open 切换与恢复，检查 nftables 残留。
+5. **向导真机走查**：四个场景各跑一遍，确认 90 秒回滚真的生效。
+6. **IPv6 路径测试**：v4/v6 的 DNS、tproxy、route 分别断言。
+7. **soak**：start/stop/restart × 100，确认无重复核心进程、规则不重复追加。
 
 ## 11. 需要人决定的事
 

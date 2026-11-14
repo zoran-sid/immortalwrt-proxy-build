@@ -10,5 +10,10 @@ min_flash_mb: 0
 min_ram_mb: 0
 enabled_by_default: false
 implicit: false
-status: ok
+status: blocked
 thirdparty: nikki
+blocked_reason: >-
+  ImageBuilder 25.12.2 的 packages.adb 有签名校验；把 Nikki 的 apk 放进
+  packages/ 并用 apk mkndx 重建索引后，apk 仍报 UNTRUSTED signature 且只认
+  官方包（run 43550558856 / 43550786477 / 43551246458）。需要给本地索引签名
+  （openssl 生成构建密钥 + apk mkndx --sign + 公钥放进 IB keys/），未完成前不进预设。

@@ -1,12 +1,11 @@
 name: lite
-description: 轻量套餐：HomeProxy + Nikki 双前端，基础监控与组网，适合 eMMC 小容量设备
+description: 轻量套餐：HomeProxy 单前端，基础监控与组网，适合 eMMC 小容量设备
 targets: [gl-mt2500, gl-mt2500-airoha, nanopi-r5s]
 proxy_default: homeproxy
 modules:
   - base
   - nat
   - proxy-homeproxy
-  - proxy-nikki
   - proxy-guard
   - frp
   - monitor-lite

@@ -1,5 +1,5 @@
 name: standard
-description: 推荐套餐：三种代理前端共存、基础监控、AdGuardHome、组网、远程接入、QoS、通知、首启向导
+description: 推荐套餐：PassWall + HomeProxy 双前端（OpenClash 可选）、基础监控、AdGuardHome、组网、远程接入、QoS、通知、首启向导
 targets: [all]
 proxy_default:
   arm: homeproxy
@@ -10,7 +10,6 @@ modules:
   - nat
   - proxy-passwall
   - proxy-homeproxy
-  - proxy-nikki
   - proxy-guard
   - frp
   - nps

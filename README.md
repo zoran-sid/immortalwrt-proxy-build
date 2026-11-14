@@ -29,9 +29,9 @@
 
 | 预设 | 适用 | 模块 | 默认代理 | rootfs |
 |---|---|---|---|---|
-| `standard` | 所有目标 | base, nat, 三个代理前端 + guard, frp, nps, monitor-lite, AdGuardHome, vpn-mesh, remote-access, qos, notify, wizard | x86: PassWall / ARM: HomeProxy | 1024 MiB |
+| `standard` | 所有目标 | base, nat, PassWall + HomeProxy + guard, frp, nps, monitor-lite, AdGuardHome, vpn-mesh, remote-access, qos, notify, wizard | x86: PassWall / ARM: HomeProxy | 1024 MiB |
 | `full` | x86-64、x86-64-vm、R6S、R76S | standard + monitor-pro, nas, docker | 同上 | 2048 MiB |
-| `lite` | MT2500、MT2500-airoha、R5S | base, nat, HomeProxy + Nikki + guard, frp, monitor-lite, vpn-mesh, wizard | HomeProxy | 1024 MiB |
+| `lite` | MT2500、MT2500-airoha、R5S | base, nat, HomeProxy + guard, frp, monitor-lite, vpn-mesh, wizard | HomeProxy | 1024 MiB |
 | `rescue` | 所有目标 | base（无任何代理前端） | 无 | 1024 MiB |
 
 `tag` 发版矩阵共 14 个构建：x86-64 × {standard, full, rescue}、x86-64-vm × {standard}、
@@ -46,7 +46,7 @@
 | nat | `nat` | UPnP（nftables）、NATMap | ✔ |
 | proxy | `proxy-passwall` | PassWall + Xray + sing-box | ✔ |
 | proxy | `proxy-homeproxy` | HomeProxy + sing-box | ✔ |
-| proxy | `proxy-nikki` | Nikki + Mihomo（第三方，锁 v1.26.2） | ✔ |
+| proxy | `proxy-nikki` | Nikki + Mihomo（第三方，锁 v1.26.2）——**blocked**，见下 | — |
 | proxy | `proxy-openclash` | OpenClash，构建时预置 mihomo 内核 | 可选 |
 | proxy | `proxy-guard` | 代理互斥 + `proxy-switch` + fail-open 看门狗 | 自动 |
 | tunnel | `frp` / `frps` | frpc / frps | ✔ / 可选 |
@@ -65,9 +65,14 @@
 | vm | `vm-guest` | qemu-guest-agent、open-vm-tools（仅 VM 目标，自动附加） | 自动 |
 | wizard | `wizard` | 首次登录向导（纯 LuCI JS + shell） | ✔ |
 
-三个代理前端可以同时**安装**，但同一时刻只允许一个**启用**：`proxy-guard` 在首启和
+代理前端可以同时**安装**，但同一时刻只允许一个**启用**：`proxy-guard` 在首启和
 `proxy-switch` 切换时停用其余前端并清理残留 nftables 表。`proxy-openclash` 保留为可选，
 不进入任何预设。
+
+> **Nikki 暂不可用**：ImageBuilder 25.12.2 的本地包索引带签名校验，第三方 apk
+> 重新索引后 apk 报 `UNTRUSTED signature` 并忽略（构建 run 43550558856 / 43550786477 /
+> 43551246458 均因此失败）。模块保留但标记 `blocked`，需要先给本地索引签名（见
+> `AGENTS.md` §7.14）。
 
 ## 快速开始
 
@@ -141,7 +146,7 @@ dist/BUILDINFO-<ver>-<target>-<preset>.txt   # 模块列表、包、IB 校验和
 
 | 资产 | 版本 | 许可证 | 用途 |
 |---|---|---|---|
-| [OpenWrt-nikki](https://github.com/nikkinikki-org/OpenWrt-nikki) | v1.26.2 | GPL-2.0 | Nikki + Mihomo apk 仓库 |
+| [OpenWrt-nikki](https://github.com/nikkinikki-org/OpenWrt-nikki) | v1.26.2 | GPL-2.0 | Nikki + Mihomo apk 仓库（blocked，见上） |
 | [mihomo](https://github.com/MetaCubeX/mihomo) | v1.19.34 | GPL-3.0 | OpenClash 预置内核 |
 
 **未纳入**：EasyTier 上游只提供 ipk（22.03.7）与 SNAPSHOT apk，没有与 25.12.2 ABI 匹配的
