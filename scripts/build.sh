@@ -75,11 +75,24 @@ source "$TP_ENV"
 
 PKGS="$PACKAGES"
 if [[ -n "${TP_REPOS_DIRS:-}" ]]; then
+  shopt -s nullglob
+  staged=0
   for repo in $TP_REPOS_DIRS; do
-    [[ -f "$repo/packages.adb" ]] || die "third-party repo without packages.adb: $repo"
-    printf '%s\n' "$repo/packages.adb" >> "$IB_DIR/repositories"
-    log "added local package repo $repo"
+    [[ -d "$repo" ]] || die "third-party repo directory missing: $repo"
+    for apk in "$repo"/*.apk; do
+      cp -f "$apk" "$IB_DIR/packages/"
+      staged=$((staged + 1))
+    done
   done
+  shopt -u nullglob
+  (( staged > 0 )) || die "third-party repo contained no .apk files"
+  # Rebuild the ImageBuilder's own package index so the extra apks become
+  # resolvable. This is exactly the command its `package_index` target runs;
+  # appending to `repositories` is NOT enough for apk to see them.
+  log "staged $staged third-party apk files, rebuilding package index"
+  ( cd "$IB_DIR/packages" && "$IB_DIR/staging_dir/host/bin/apk" mkndx \
+      --allow-untrusted --output packages.adb ./*.apk ) \
+    || die "apk mkndx failed"
 fi
 if [[ -n "${TP_PACKAGES:-}" ]]; then
   PKGS="$PKGS $TP_PACKAGES"
