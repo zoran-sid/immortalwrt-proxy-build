@@ -118,10 +118,13 @@ custom 构建的 preset 是 `custom-<sha256(排序模块列表)[:8]>`。
 9. **新增**：GitHub matrix 需要 `{"include": [...]}` 结构，`fromJSON` 直接吃。
 10. **新增**：`python3 scripts/resolve.py matrix` 里不要复用循环变量名（曾把 target 名
     覆盖成 `full`，导致矩阵错乱）。已有单测覆盖。
-11. **新增**：第三方 apk 不能靠往 IB 的 `repositories` 追加本地路径（实测 apk 不认，
-    构建报 `luci-app-nikki (no such package)`，run 43550558856）。正确做法：把 `.apk`
-    拷进 `$IB_DIR/packages/`，再执行 IB 自带命令
-    `apk mkndx --allow-untrusted --output packages.adb ./*.apk` 重建索引。
+11. **新增**：第三方 apk 的注入分两步，缺一步都失败：
+    (a) 不能往 IB 的 `repositories` 追加本地路径（apk 不认，run 43550558856）；
+    (b) 把 `.apk` 拷进 `$IB_DIR/packages/` 并用 IB 自带命令
+        `apk mkndx --allow-untrusted --output packages.adb ./*.apk` 重建索引后，
+        还要用 `make ... CONFIG_SIGNATURE_CHECK=` 覆盖 IB `.config` 里的 `=y`，
+        否则重建出来的是未签名索引，apk 报 `UNTRUSTED signature` 并忽略它
+        （run 43550786477）。
 12. **新增**：`build.sh` 里 `cd "$IB_DIR"` 之后不能用相对路径读 `$WORKDIR` 的文件，
     IB 校验和要提前存进变量。
 13. **新增**：`custom-<hash>` 预设必须能被再次解析（resolve 把 `custom-*` 当 custom 处理）。

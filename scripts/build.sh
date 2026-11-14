@@ -106,6 +106,10 @@ fi
 log "building image"
 cd "$IB_DIR"
 make_args=(image "PROFILE=$PROFILE" "PACKAGES=$PKGS" "ROOTFS_PARTSIZE=$ROOTFS_PARTSIZE")
+# The ImageBuilder ships CONFIG_SIGNATURE_CHECK=y, so its apk invocations omit
+# --allow-untrusted and reject our rebuilt (unsigned) package index. A
+# command-line assignment overrides .config for the whole make run.
+make_args+=("CONFIG_SIGNATURE_CHECK=")
 if [[ -n "$(find "$OVERLAY" -type f -print -quit 2>/dev/null)" ]]; then
   make_args+=("FILES=$OVERLAY")
 fi
