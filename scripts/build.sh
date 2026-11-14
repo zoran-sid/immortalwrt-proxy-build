@@ -124,16 +124,23 @@ find "$OUTDIR/images" -maxdepth 1 -type f \
   \( -name "${OUT_PREFIX}-*" -o -name "${OUT_PREFIX}.manifest" \) -delete
 shopt -s nullglob
 copied=0
+# x86 produces disk images/ISOs, rockchip produces .img.gz, mediatek/filogic
+# glinet devices produce .bin (sysupgrade/factory) and some targets use .itb.
+# Bootloader/initramfs artefacts (preloader, u-boot/fip, *-kernel) are not
+# installable firmware and are skipped.
 for f in "$BIN_DIR"/*.img.gz "$BIN_DIR"/*.qcow2 "$BIN_DIR"/*.vmdk \
-         "$BIN_DIR"/*.vhdx "$BIN_DIR"/*.vdi "$BIN_DIR"/*.iso; do
+         "$BIN_DIR"/*.vhdx "$BIN_DIR"/*.vdi "$BIN_DIR"/*.iso \
+         "$BIN_DIR"/*.itb "$BIN_DIR"/*.bin "$BIN_DIR"/*.ubi; do
   name="$(basename "$f")"
-  case "$name" in *rootfs*|*kernel*) continue ;; esac
+  case "$name" in
+    *rootfs*|*kernel*|*initramfs*|*preloader*|*u-boot*|*uboot*|*.fip) continue ;;
+  esac
   rest="${name#"$IB_PREFIX"}"
   rest="${rest#"${PROFILE}"-}"
   cp -f "$f" "$OUTDIR/images/${OUT_PREFIX}-${rest}"
   copied=$((copied + 1))
 done
-(( copied > 0 )) || die "no comparable images produced"
+(( copied > 0 )) || die "no comparable images produced under $BIN_DIR"
 
 # `make image` does not emit a manifest; read the installed-package database
 # from the assembled rootfs instead of rebuilding it with `make manifest`.

@@ -187,6 +187,34 @@ class EnvContractTests(unittest.TestCase):
                 self.assertIn(key, env, "%s/%s missing %s" % (pair[0], pair[1], key))
 
 
+class PackageTests(unittest.TestCase):
+    def test_vm_guest_does_not_install_file_conflicting_packages(self):
+        # 25.12.2 apk refuses to install qemu-ga and open-vm-tools together:
+        # both ship /sbin/shutdown (run 43553957085 failed on this).
+        path = os.path.join(ROOT, "modules", "vm-guest", "packages.txt")
+        with open(path, encoding="utf-8") as fh:
+            packages = {
+                line.split("#", 1)[0].strip()
+                for line in fh
+                if line.split("#", 1)[0].strip()
+            }
+        self.assertFalse(
+            {"qemu-ga", "open-vm-tools"} <= packages,
+            "qemu-ga and open-vm-tools conflict on /sbin/shutdown",
+        )
+
+    def test_image_collection_covers_arm_formats(self):
+        # gl-mt2500 ships squashfs-factory.bin/squashfs-sysupgrade.bin; other
+        # targets use .img.gz/.itb. Missing patterns made ARM builds fail after
+        # a successful image build (run 43553962605).
+        with open(os.path.join(ROOT, "scripts", "build.sh"), encoding="utf-8") as fh:
+            text = fh.read()
+        for pattern in ("*.img.gz", "*.itb", "*.bin", "*.qcow2"):
+            self.assertIn(pattern, text, "build.sh does not collect %s" % pattern)
+        for skip in ("*initramfs*", "*preloader*", "*u-boot*"):
+            self.assertIn(skip, text, "build.sh does not skip %s" % skip)
+
+
 class SecurityInvariantTests(unittest.TestCase):
     def test_build_does_not_disable_apk_signature_checks(self):
         # The unsigned third-party index workaround used to override the

@@ -1,5 +1,8 @@
 name: vm-guest
-description: 虚拟机增强：qemu-guest-agent、open-vm-tools（virtio/Hyper-V 网卡为内核内建，无独立 kmod）
+description: >-
+  虚拟机增强：qemu-guest-agent（virtio/Hyper-V 网卡为内核内建，无独立 kmod）。
+  open-vm-tools 与 qemu-ga 都安装 /sbin/shutdown，25.12.2 的 apk 会因文件冲突
+  拒绝同时安装；VMware 用户请用 custom 构建把 qemu-ga 换成 open-vm-tools。
 category: vm
 source: official
 conflicts: []
