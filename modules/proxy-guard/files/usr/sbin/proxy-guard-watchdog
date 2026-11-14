@@ -102,6 +102,36 @@ failopen_since=0
 next_recover=0
 backoff="$INTERVAL"
 
+# Recover the persisted state after a procd respawn / reboot / policy change.
+# If the guard had fail-opened, policy=closed must put the recorded frontend
+# back (otherwise "fail-closed" would silently mean "direct routing"); policy=
+# open resumes the fail-open timer instead of probing a disabled proxy as if it
+# were healthy.
+state0="$(uci -q get proxy-guard.main.state 2>/dev/null)"
+if [ "$state0" = "failopen" ]; then
+	proxy0="$(active_proxy)"
+	if [ -z "$proxy0" ] || [ "$proxy0" = "off" ]; then
+		set_state normal
+	elif [ "$POLICY" = "closed" ]; then
+		log "policy=closed with persisted fail-open: re-enabling $proxy0"
+		if /usr/sbin/proxy-switch "$proxy0" >/dev/null 2>&1; then
+			set_state closed
+		else
+			log "could not re-enable $proxy0; staying in fail-open state"
+			mode=failopen
+			failopen_since="$(date +%s)"
+			next_recover="$RECOVER_DELAY"
+			backoff="$RECOVER_DELAY"
+		fi
+	else
+		mode=failopen
+		failopen_since="$(date +%s)"
+		next_recover="$RECOVER_DELAY"
+		backoff="$RECOVER_DELAY"
+		log "resuming fail-open state for $proxy0"
+	fi
+fi
+
 while :; do
 	proxy="$(active_proxy)"
 	now="$(date +%s)"

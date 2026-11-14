@@ -33,6 +33,15 @@
 WSL 不可用不阻塞 CI 构建与 QEMU 验证，但**本地 ImageBuilder 构建**仍需要
 Linux（WSL 或 Linux 主机）。安装命令与后续步骤见 §8。
 
+Windows 无管理员安装 QEMU（本次实际使用的方式）：
+
+```powershell
+curl.exe -L -o msys2.tar.xz https://github.com/msys2/msys2-installer/releases/download/nightly-x86_64/msys2-base-x86_64-latest.tar.xz
+tar -xf msys2.tar.xz
+.\msys64\usr\bin\bash.exe -lc "pacman -S --needed --noconfirm mingw-w64-ucrt-x86_64-qemu"
+# QEMU: .\msys64\ucrt64\bin\qemu-system-x86_64.exe
+```
+
 网络说明：当前进程在 Low 完整级时 schannel 报 `SEC_E_NO_CREDENTIALS`，
 提升到 Medium 后 HTTPS 正常；脚本统一使用 Git 的 `credential.helper=manager`
 读取已有凭据，未把 token 写入仓库或日志。
@@ -82,7 +91,8 @@ scripts/build.sh: line 176: PRESET_KIND: unbound variable
 | x86-64 / full | [43553946255](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43553946255) | 1e3ea2c | **PASS** | **PASS** |
 | x86-64-vm / standard | [43554233088](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43554233088) | a57f08d | **PASS** | **PASS**（含 qcow2/vmdk/vhdx/vdi） |
 | gl-mt2500 / lite | [43554228173](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43554228173) | a57f08d | **PASS** | **PASS**（factory/sysupgrade.bin） |
-| x86-64 / standard（watchdog 修复后复验） | 43558113595 | 197152c | 见 §6.2 | — |
+| x86-64 / standard（watchdog 修复 v1） | [43558113595](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43558113595) | 197152c | **PASS**（build job 已含 verify 步骤） | **PASS** |
+| x86-64 / standard（watchdog 修复 v2，最终） | [43560788676](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43560788676) | 9abb8c4 | 见 §6.1 | 见 §6.1 |
 
 产物校验（`tests/verify_artifacts.py`）检查：每个 SHA256 条目存在且哈希匹配、
 没有未纳入校验的产物、BUILDINFO 必需键齐全、manifest 非空、文件名符合
@@ -160,7 +170,7 @@ git commit、run id/url、构建时间。
 
 ### 5.1 看门狗真实缺陷（已修复）
 
-运行日志：
+第一次运行日志：
 
 ```
 daemon.err proxy-guard-watchdog: /usr/sbin/proxy-guard-watchdog:
@@ -171,8 +181,33 @@ daemon.err proxy-guard-watchdog: /usr/sbin/proxy-guard-watchdog:
 放弃，`state` 一直是 `normal`，fail-open 永远不会触发。这是**会导致代理故障时
 不恢复**的 P0 级缺陷。
 
-修复：source 前定义/导出 `IPKG_INSTROOT`，仅 source 期间临时关闭 nounset。
-新增静态回归测试。修复后的完整运行时复验见 §6.2。
+第一次修复（定义/导出 `IPKG_INSTROOT`）后重新构建（run 43558113595），
+运行时日志又发现：
+
+```
+line 29: CONFIG_LIST_STATE: parameter not set
+```
+
+`config_load` / `config_get` 本身不是 nounset-clean 的，只补一个变量不够。
+最终修复：**watchdog 不再使用 `set -u`**，所有配置项通过 `config_get` 默认值
+初始化；静态测试禁止任何 source `/lib/functions.sh` 的脚本再启用 nounset。
+
+注入验证（不重建镜像，直接把修复后的脚本写入 guest 并重启守护进程）：
+
+```
+started policy=open interval=2s threshold=2 recover=6s
+proxy probe failed (1/2)
+proxy probe failed (2/2)
+fail-open: disabling proxy, restoring direct routing
+recovery attempt: re-enabling passwall
+recovery failed, returning to direct routing
+```
+
+状态机结果：`state=failopen`、`active=passwall` 保留、恢复尝试次数 ≥1、
+恢复失败后仍回到 failopen 并延长退避。**fail-open + 自动恢复逻辑 PASS**。
+
+（注入时 md5 因串口行尾转换不一致，但行为与主机脚本一致；最终以重建镜像的
+运行时测试为准。）
 
 ---
 
@@ -188,9 +223,24 @@ daemon.err proxy-guard-watchdog: /usr/sbin/proxy-guard-watchdog:
 | 90 秒不确认 | 自动回滚：LAN 恢复 192.168.1.1，applied=0，dnsmasq 存活 |
 | 回滚后备份/服务 | 备份在 `/etc/wizard-backups`（持久化），回滚显式 reload network/dnsmasq/firewall |
 
-第一次运行在 `curl`（没有 `-m`）处超时，脚本中断，因此以下项尚未完成：
-确认路径、订阅 token 日志检查、network-doctor 脱敏、IPv6 信息项。
-已修复测试脚本（重试、`curl -m`、显式 if/else），待 watchog 修复镜像重跑后补全。
+第二次运行（含 watchdog 首次修复的镜像，40 项检查）：**35 PASS / 5 FAIL**，
+失败的 5 项全部是 watchdog 没起来（见 §5.1），其余全部通过：
+
+| 场景 | 结果 |
+|---|---|
+| proxy-switch 互斥、未安装保护、失败恢复、无重复 nft 表、off | PASS |
+| 向导非法输入 / 未安装前端 / 不产生无谓备份 | PASS |
+| 回滚 95 秒后 LAN 恢复、applied=0、dnsmasq 存活 | PASS |
+| 回滚后 LuCI 仍返回 200 | PASS |
+| 确认路径：95 秒后配置仍保留 | PASS |
+| 订阅 token 未写入 syslog | PASS |
+| 订阅 URL 只存本机 `/etc/config/wizard` | PASS |
+| network-doctor：token 脱敏（0 命中） | PASS |
+| network-doctor：输出 CLASSIFICATION | PASS |
+| network-doctor `--redact-node-ip`：IPv4 已掩码（0 命中） | PASS |
+| IPv6：br-lan 有全局地址（信息项，未做端到端） | PASS |
+
+watchdog 最终修复后重建镜像（run 43560788676）的完整复验见 §6.1。
 
 ---
 
