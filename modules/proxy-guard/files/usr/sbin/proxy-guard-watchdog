@@ -10,7 +10,14 @@
 #   * policy=open   ：连续故障达阈值后停用代理、恢复直连，并周期重试。
 #   * policy=closed ：保留代理原状，只记录/通知，不放行直连。
 set -u
+# /lib/functions.sh dereferences IPKG_INSTROOT while being sourced; with `set -u`
+# that aborts the watchdog at startup ("IPKG_INSTROOT: parameter not set"), which
+# leaves the guard silently dead. Define it and relax nounset only for the source.
+IPKG_INSTROOT="${IPKG_INSTROOT:-}"
+export IPKG_INSTROOT
+set +u
 . /lib/functions.sh
+set -u
 
 config_load proxy-guard
 config_get POLICY main policy open

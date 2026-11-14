@@ -157,11 +157,34 @@ dist/BUILDINFO-<ver>-<target>-<preset>.txt   # 模块列表、包、IB 校验和
 
 ## 构建状态与未验证项
 
-- 本文档不预先声明构建成功；以 Actions 的实际结果为准。
-- **未真机验证**：向导 UI、`proxy-guard` 的 fail-open 行为、Nikki 在 ARM 上的运行、
-  三种场景（主路由/旁路由/旅行）的实际连通性。
-- **未做**：QEMU 冒烟、IPv6 透明代理测试、24–72h soak。
-- `x86-nics` 的驱动包只保证在 feed 中存在，未在真实网卡上验证。
+最近一轮验证（2026-11-14，分支 `fix/build-metadata-and-presets`，详见
+`docs/validation.md`）：
+
+| 项 | 结果 |
+|---|---|
+| x86-64 / rescue 构建 + 产物校验 | ✅ PASS（run 43553951623） |
+| x86-64 / standard 构建 + 产物校验 | ✅ PASS（run 43554466382） |
+| x86-64 / full 构建 | ✅ PASS（run 43553946255，含 Docker/NAS） |
+| x86-64-vm / standard 构建 | ✅ PASS（run 43554233088） |
+| gl-mt2500 / lite 构建 | ✅ PASS（run 43554228173，factory/sysupgrade.bin） |
+| QEMU 启动（rescue / standard） | ✅ PASS：ubus、procd、dnsmasq A/AAAA、nftables/fw4、SSH、LuCI、WAN、外网、冷启动持久化 |
+| QEMU 内代理切换 / fail-open / 向导回滚 | 见 `docs/validation.md`（按实际执行结果记录） |
+| ARM 真机启动 | ❌ 未验证（只有构建产物，没有对应硬件） |
+| 真实机场订阅 / 节点出口 | ❌ 未验证（不保存凭据，也不接入真实节点） |
+| IPv6 透明代理 / TProxy 端到端 | ❌ 未验证（QEMU 用户态网络没有可路由的 IPv6 上游） |
+| 24–72h soak、真实网卡驱动 | ❌ 未验证 |
+
+**x86 镜像默认只有 LAN**：ImageBuilder 25.12.2 的 x86 网络配置不含 WAN，
+需要首次登录向导（主路由 DHCP/PPPoE）或手工 `uci set network.wan...` 才有外网。
+QEMU 冒烟测试会显式添加 `eth1` DHCP WAN。
+
+**f2fs overlay 的检查点**：x86 镜像把 overlay 放在 `/dev/sda2` 尾部的 f2fs
+loop 设备上。f2fs 惰性检查点，写入后立刻断电可能回滚到上一个检查点（实测
+标记丢失）。正常重启或写入后等待约 20 秒即可持久化，冒烟测试因此会等待
+检查点后再断电。
+
+不要声称任何镜像「已在真机稳定运行」；目前能证明的是「构建通过 + 产物
+一致 + QEMU 启动/基础网络通过」。
 
 ## 仓库结构
 
@@ -176,7 +199,33 @@ scripts/build.sh       解析 → 下载 IB → 组装 → make image → 产物
 tests/test_resolve.py  解析器单测（冲突、目标限制、hash 稳定性、矩阵）
 ```
 
+## 本地验证（Windows / Linux，QEMU）
+
+仓库自带两个不依赖路由器的测试入口：
+
+```bash
+# 静态检查：解析器、构建契约、BusyBox 兼容性、redaction、看门狗/向导回归
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+
+# 产物校验：SHA256SUMS / BUILDINFO / manifest 是否齐全一致
+python3 tests/verify_artifacts.py dist
+
+# QEMU 启动冒烟：ubus、procd、DNS、nftables、SSH、LuCI、WAN、外网、冷启动持久化
+python3 tests/qemu_smoke.py --image firmware.img --log smoke.log
+
+# 代理/看门狗/向导运行时测试（需要含 proxy-guard + wizard 的 standard 镜像）
+python3 tests/qemu_runtime.py --image standard.img --log runtime.log
+```
+
+Windows 上没有 WSL 也可以跑：QEMU for Windows（或 MSYS2 的
+`mingw-w64-ucrt-x86_64-qemu`）加 Python 3 即可，TCG 软件模拟不需要 KVM。
+Linux 上存在 `/dev/kvm` 时会自动启用 KVM。镜像格式用
+`*-squashfs-combined.img.gz`（解压成 `.img`）。
+
+> 串口控制台在高负载 TCG 下会丢字符，`tests/qemu_smoke.py` 已对输入限速并
+> 用 `@@B/@@E` 帧解析输出；自己写脚本时不要假设一次 `send` 能完整到达。
+
 ## 面向公众
 
-仓库当前是 **private**。要惠及他人需要改 public —— 这一步由仓库主人决定，本文档只做说明：
-镜像不含任何订阅、节点或凭据；第三方资产只记录来源 URL 与 sha256，可审计。
+仓库现在是 **public**。镜像不含任何订阅、节点或凭据；第三方资产只记录来源
+URL 与 sha256，可审计。

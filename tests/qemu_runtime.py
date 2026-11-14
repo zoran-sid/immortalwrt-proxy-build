@@ -36,13 +36,22 @@ RAW_DOCTOR = "https://raw.githubusercontent.com/%s/%s/scripts/diagnostics/networ
 results = []
 
 
-def check(con, name, cmd, expect=None, forbid=None, timeout=120):
-    out, _ = con.command(cmd, timeout=timeout)
-    ok = True
-    if expect is not None and expect not in out:
-        ok = False
-    if forbid is not None and forbid in out:
-        ok = False
+def check(con, name, cmd, expect=None, forbid=None, timeout=120, retries=2):
+    out = ""
+    ok = False
+    for attempt in range(retries + 1):
+        try:
+            out, _ = con.command(cmd, timeout=timeout)
+        except TimeoutError:
+            out = "<timeout>"
+        ok = True
+        if expect is not None and expect not in out:
+            ok = False
+        if forbid is not None and forbid in out:
+            ok = False
+        if ok:
+            break
+        time.sleep(1)
     results.append((name, ok))
     print("%s  %s" % ("PASS" if ok else "FAIL", name))
     if not ok:
@@ -122,22 +131,27 @@ def main():
         code, _ = rc(con, "/usr/sbin/proxy-switch passwall")
         results.append(("switch: passwall rc=0", code == "0"))
         check(con, "switch: active=passwall", "uci -q get proxy-guard.main.active", "passwall")
-        check(con, "switch: passwall enabled", "/etc/init.d/passwall enabled && echo yes", "yes")
+        check(con, "switch: passwall enabled",
+              "if /etc/init.d/passwall enabled >/dev/null 2>&1; then echo enabled; else echo disabled; fi",
+              "enabled")
         check(con, "switch: homeproxy disabled",
-              "/etc/init.d/homeproxy enabled >/dev/null 2>&1 || echo disabled", "disabled")
+              "if /etc/init.d/homeproxy enabled >/dev/null 2>&1; then echo enabled; else echo disabled; fi",
+              "disabled")
 
         code, _ = rc(con, "/usr/sbin/proxy-switch homeproxy")
         results.append(("switch: homeproxy rc=0", code == "0"))
         check(con, "switch: active=homeproxy", "uci -q get proxy-guard.main.active", "homeproxy")
         check(con, "switch: passwall disabled",
-              "/etc/init.d/passwall enabled >/dev/null 2>&1 || echo disabled", "disabled")
+              "if /etc/init.d/passwall enabled >/dev/null 2>&1; then echo enabled; else echo disabled; fi",
+              "disabled")
 
         code, out = rc(con, "/usr/sbin/proxy-switch nikki")
         results.append(("switch: uninstalled frontend fails", code != "0" and "not installed" in out))
         check(con, "switch: failed switch keeps homeproxy active",
               "uci -q get proxy-guard.main.active", "homeproxy")
         check(con, "switch: failed switch keeps homeproxy enabled",
-              "/etc/init.d/homeproxy enabled && echo yes", "yes")
+              "if /etc/init.d/homeproxy enabled >/dev/null 2>&1; then echo enabled; else echo disabled; fi",
+              "enabled")
 
         # A target that exists but cannot start must restore the previous one.
         con.command("cp /etc/init.d/passwall /tmp/passwall.real && "
@@ -145,7 +159,8 @@ def main():
                     "chmod +x /etc/init.d/passwall", timeout=60)
         code, _ = rc(con, "/usr/sbin/proxy-switch passwall")
         restored = con.command(
-            "uci -q get proxy-guard.main.active; /etc/init.d/homeproxy enabled && echo hp-enabled"
+            "uci -q get proxy-guard.main.active; "
+            "if /etc/init.d/homeproxy enabled >/dev/null 2>&1; then echo hp-enabled; fi"
         )[0]
         results.append(("switch: start failure restores previous",
                         code != "0" and "homeproxy" in restored and "hp-enabled" in restored))
@@ -170,6 +185,8 @@ def main():
         con.command("/usr/sbin/proxy-switch passwall", timeout=120)
 
         # ---- proxy-guard watchdog ------------------------------------------
+        check(con, "guard: service running",
+              "pgrep -f '[p]roxy-guard-watchdog' >/dev/null && echo running", "running")
         con.command("cp /etc/config/proxy-guard /tmp/pg.bak")
         con.command(
             "uci set proxy-guard.main.interval=2; "
@@ -181,7 +198,7 @@ def main():
             "uci set proxy-guard.main.probe_dns='223.5.5.5 1.1.1.1'; "
             "uci commit proxy-guard; /etc/init.d/proxy-guard restart", timeout=60)
         time.sleep(14)
-        check(con, "guard: fail-open state", "uci -q get proxy-guard.main.state", "failopen")
+        check(con, "guard: fail-open state", "uci -q get proxy-guard.main.state", "failopen", retries=4)
         check(con, "guard: active record kept", "uci -q get proxy-guard.main.active", "passwall")
         time.sleep(24)
         attempts = con.command("logread | grep -c 'recovery attempt'")[0].strip()
@@ -189,7 +206,7 @@ def main():
         print("%s  guard: recovery attempted (count=%s)"
               % ("PASS" if results[-1][1] else "FAIL", attempts))
         check(con, "guard: still fail-open after failed recovery",
-              "uci -q get proxy-guard.main.state", "failopen")
+              "uci -q get proxy-guard.main.state", "failopen", retries=4)
 
         # fail-closed must keep the proxy enabled.
         con.command("/usr/sbin/proxy-switch passwall >/dev/null 2>&1; "
@@ -198,7 +215,8 @@ def main():
         time.sleep(10)
         check(con, "guard: fail-closed state", "uci -q get proxy-guard.main.state", "closed")
         check(con, "guard: fail-closed keeps proxy enabled",
-              "/etc/init.d/passwall enabled && echo yes", "yes")
+              "if /etc/init.d/passwall enabled >/dev/null 2>&1; then echo enabled; else echo disabled; fi",
+              "enabled")
         con.command("cp /tmp/pg.bak /etc/config/proxy-guard; /etc/init.d/proxy-guard restart",
                     timeout=60)
 
@@ -231,7 +249,7 @@ def main():
         check(con, "wizard: dnsmasq alive after rollback",
               "pgrep -f '[d]nsmasq' >/dev/null && echo alive", "alive")
         check(con, "wizard: LuCI alive after rollback",
-              "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/", "200")
+              "curl -m 8 -s -o /dev/null -w '%{http_code}' http://127.0.0.1/", "200")
 
         # Confirm path: config must stay.
         code, out = rc(con, "/usr/libexec/wizard/apply.sh scenario=router-dhcp "

@@ -12,7 +12,7 @@
 用 ImmortalWrt 官方 **ImageBuilder** 产出多目标固件：x86-64、x86-64 虚拟机，
 以及 5 个受支持的 ARM64 设备。镜像内容由「模块 + 预设」组合决定，不编译源码。
 
-- 仓库：`zoran-sid/immortalwrt-proxy-build`（**private**，改可见性由仓库主人决定）
+- 仓库：`zoran-sid/immortalwrt-proxy-build`（**public**）
 - 默认分支：`main`
 - 上游基线：ImmortalWrt **25.12.2**（apk 包管理）
 
@@ -23,15 +23,16 @@
 | 项 | 状态 |
 |---|---|
 | 结构重构（targets/modules/presets/resolve/build/workflows） | ✅ 已完成 |
-| 解析器单测（14 项：冲突/目标限制/requires/hash/矩阵/binary 第三方） | ✅ 本地通过 |
+| 解析器/构建契约/BusyBox/回归测试（36 项） | ✅ 本地与 CI 通过 |
 | 包名核实（x86_64 / aarch64_cortex-a53 / aarch64_generic） | ✅ 逐包核对过 feed |
-| 重构后 CI 构建 | ⚠️ 3 次均失败于第三方索引签名（详见 §7.14）；去掉 Nikki 后待复验 |
-| 已有 25.12.2 旧结构产物（passwall/openclash/homeproxy） | ✅ Release `25.12.2` 里仍可下载 |
-| 向导 UI / proxy-guard / Nikki on ARM | ❌ **未真机验证** |
-| QEMU 冒烟 / IPv6 / soak | ❌ 未做 |
+| 重构后 CI 构建（rescue、standard、full、vm、gl-mt2500 lite） | ✅ 全部通过，产物 SHA256/BUILDINFO/manifest 校验通过（`docs/validation.md`） |
+| QEMU 启动冒烟（rescue、standard） | ✅ 12 项检查 + 冷启动持久化通过 |
+| QEMU 内 proxy-switch / fail-open / 向导回滚 | ✅ 见 `docs/validation.md`（按实际结果记录） |
+| 向导 UI / proxy-guard / Nikki on ARM | ⚠️ QEMU 内已验证逻辑；**未真机验证** |
+| IPv6 端到端 / soak | ❌ 未做（QEMU 用户态网络无 IPv6 上游） |
 | Brume 3（GL-MT5000） | ⏳ 上游未提供 profile，仅预留 `targets/brume3.yml` |
 
-不要声称任何镜像「可用」；只能声称「构建通过 / 未构建」。
+不要声称任何镜像「可用」或「真机稳定」；只能声称「构建通过 / QEMU 冒烟通过」。
 
 ## 3. 常用命令
 
@@ -119,21 +120,37 @@ custom 构建的 preset 是 `custom-<sha256(排序模块列表)[:8]>`。
 9. **新增**：GitHub matrix 需要 `{"include": [...]}` 结构，`fromJSON` 直接吃。
 10. **新增**：`python3 scripts/resolve.py matrix` 里不要复用循环变量名（曾把 target 名
     覆盖成 `full`，导致矩阵错乱）。已有单测覆盖。
-11. **新增**：第三方 apk 的注入分两步，缺一步都失败：
-    (a) 不能往 IB 的 `repositories` 追加本地路径（apk 不认，run 43550558856）；
-    (b) 把 `.apk` 拷进 `$IB_DIR/packages/` 并用 IB 自带命令
-        `apk mkndx --allow-untrusted --output packages.adb ./*.apk` 重建索引后，
-        还要用 `make ... CONFIG_SIGNATURE_CHECK=` 覆盖 IB `.config` 里的 `=y`，
-        否则重建出来的是未签名索引，apk 报 `UNTRUSTED signature` 并忽略它
-        （run 43550786477）。
+11. **已废弃**：过去为了注入第三方 apk，会把 `.apk` 拷进 `$IB_DIR/packages/`
+    再用 `apk mkndx --allow-untrusted` 重建索引，并传 `CONFIG_SIGNATURE_CHECK=`。
+    这会关闭整个构建的 apk 签名校验；现在 `build.sh` 直接拒绝第三方 apk 仓库
+    （`TP_REPOS_DIRS` 非空即失败）。第三方**二进制**（overlay 注入，如 mihomo）
+    不受影响。
 12. **新增**：`build.sh` 里 `cd "$IB_DIR"` 之后不能用相对路径读 `$WORKDIR` 的文件，
     IB 校验和要提前存进变量。
 13. **新增**：`custom-<hash>` 预设必须能被再次解析（resolve 把 `custom-*` 当 custom 处理）。
-14. **未解决**：Nikki 的 apk 进了 `packages/` 并重建索引后，apk 仍报
-    `UNTRUSTED signature` 且只认官方包。`CONFIG_SIGNATURE_CHECK=` 传进 make 也没用
-    （run 43551246458）。下一步要么用 openssl 生成构建密钥 + `apk mkndx --sign` +
-    公钥放进 `$IB_DIR/keys/`，要么等上游给出第三方包的签名方案。在此之前
-    `proxy-nikki` 保持 `blocked`，不要加回预设。
+14. **未解决**：Nikki 的 apk 索引签名。第三方包要进镜像，必须先有可信的
+    本地 apk 索引（构建密钥 + `apk mkndx --sign` + 公钥放进 `$IB_DIR/keys/`），
+    或者上游给出签名方案。`proxy-nikki` 保持 `blocked`，不要加回预设，也不要
+    用关闭签名校验的方式绕过。
+15. **新增**：`resolve.py` 与 `build.sh` 之间有环境变量契约。重构时漏发
+    `PRESET_KIND`，`set -u` 让构建在镜像已经做好、写 BUILDINFO 时退出，CI 什么都没
+    上传（run 43551668831）。现在 build.sh 在 source plan 后立刻检查必需变量，
+    `tests/test_build_plan.py` 也会校验。
+16. **新增**：ARM 产物不一定是 `.img.gz`。mediatek/filogic 的 glinet 设备出
+    `squashfs-factory.bin` / `squashfs-sysupgrade.bin`，只收集 `.img.gz` 会让
+    gl-mt2500/lite 在构建成功后报 "no comparable images produced"（run 43553962605）。
+    收集 `.bin/.itb/.ubi`，并跳过 initramfs/preloader/u-boot/fip。
+17. **新增**：`qemu-ga` 与 `open-vm-tools` 都装 `/sbin/shutdown`，25.12.2 的 apk
+    会因文件冲突拒绝同时安装（run 43553957085）。`vm-guest` 只保留 qemu-ga；
+    VMware 用户用 custom 构建替换。
+18. **新增**：x86 ImageBuilder 镜像默认只有 LAN，没有 `network.wan`。首次登录向导
+    才是配置 WAN 的正常路径；QEMU 冒烟测试会显式加 `eth1` DHCP WAN。
+19. **新增**：x86 的 overlay 是 `/dev/sda2` 尾部偏移处的 f2fs loop 设备。f2fs 惰性
+    检查点：`uci commit` 后立刻断电可能回滚到上一个检查点（标记测试已复现）。
+    验证持久化时要 `sync` 并等待约 20 秒再断电；不要据此判断镜像不持久化。
+20. **新增**：QEMU 串口在 TCG 高负载下会丢字符。测脚本要限制发送速率、用成帧
+    输出（`@@B`/`@@E`）解析，不能依赖一次 `send` 完整到达，也不能依赖 `$?`
+    单独标记（可能整行被截断）。
 
 ## 8. 改动指南
 
@@ -171,22 +188,22 @@ manifest 解析这些假设都要复核。
 
 ## 10. 未完成 / 下一步（按价值）
 
-1. **CI 构建复验**：先去跑 x86-64/standard 与 gl-mt2500/lite（Nikki 已移出预设）。
-   验收：镜像、manifest、SHA256SUMS、BUILDINFO 齐全，`sha256sum -c` 通过。
+1. **WSL2 本地构建环境**：当前机器没有安装 WSL（需要管理员 + 可能重启）。
+   命令：管理员 PowerShell 执行 `wsl --install -d Ubuntu`，重启后再跑
+   `python3 tests/test_resolve.py`、`tests/verify_artifacts.py` 和 `scripts/build.sh`。
+   在此之前本地构建用 CI；QEMU 冒烟在 Windows 原生 QEMU 上已验证。
 2. **给本地 apk 索引签名**（恢复 Nikki 的前置条件，见 §7.14）。
-3. **QEMU 冒烟**：x86 镜像无头启动，断言 ubus、dnsmasq、firewall4、代理前端服务存在。
-4. **proxy-guard 行为测试**：人为断网验证 fail-open 切换与恢复，检查 nftables 残留。
-5. **向导真机走查**：四个场景各跑一遍，确认 90 秒回滚真的生效。
-6. **IPv6 路径测试**：v4/v6 的 DNS、tproxy、route 分别断言。
-7. **soak**：start/stop/restart × 100，确认无重复核心进程、规则不重复追加。
+3. **真机验证**：向导四场景、proxy-guard 断网切换、真实网卡驱动、ARM 设备启动。
+4. **IPv6 端到端**：需要有可路由 IPv6 上游的环境，验证 AAAA/DNS/TPROXY 一致性。
+5. **soak**：start/stop/restart × 100，确认无重复核心进程、规则不重复追加。
+6. **ARM 硬件测试**：GL-MT2500 / NanoPi 需要真实设备，构建成功≠可启动。
 
 ## 11. 需要人决定的事
 
 1. 机场订阅格式（Clash YAML / 通用 URL / V2Ray base64 / sing-box JSON）——
    决定向导里"导入订阅"能做到哪一步（目前只把 URL 存进本机 UCI，仍需到插件页面粘贴）。
 2. 是否要 ARM VM（armsr）——当前明确不做。
-3. 仓库是否转 public。
-4. 是否需要 frps、OpenClash 进入默认套餐（现在都不进）。
+3. 是否需要 frps、OpenClash 进入默认套餐（现在都不进）。
 
 ## 12. 完成标准
 
