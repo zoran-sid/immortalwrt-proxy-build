@@ -9,15 +9,12 @@
 #     重新启用代理 → 验证 → 验证失败则回到直连并指数退避。
 #   * policy=open   ：连续故障达阈值后停用代理、恢复直连，并周期重试。
 #   * policy=closed ：保留代理原状，只记录/通知，不放行直连。
-set -u
-# /lib/functions.sh dereferences IPKG_INSTROOT while being sourced; with `set -u`
-# that aborts the watchdog at startup ("IPKG_INSTROOT: parameter not set"), which
-# leaves the guard silently dead. Define it and relax nounset only for the source.
-IPKG_INSTROOT="${IPKG_INSTROOT:-}"
-export IPKG_INSTROOT
-set +u
+#
+# 注意：这里故意不用 `set -u`。/lib/functions.sh 的 config_load/config_get 会
+# 引用 CONFIG_LIST_STATE、IPKG_INSTROOT 等未定义变量，nounset 会让这个守护进程
+# 一启动就退出（procd 重试几次后放弃，fail-open 永远不会触发）。所有配置项都有
+# config_get 默认值，空值由代码显式处理。
 . /lib/functions.sh
-set -u
 
 config_load proxy-guard
 config_get POLICY main policy open

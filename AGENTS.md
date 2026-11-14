@@ -23,7 +23,7 @@
 | 项 | 状态 |
 |---|---|
 | 结构重构（targets/modules/presets/resolve/build/workflows） | ✅ 已完成 |
-| 解析器/构建契约/BusyBox/回归测试（36 项） | ✅ 本地与 CI 通过 |
+| 解析器/构建契约/BusyBox/回归测试（37 项） | ✅ 本地与 CI 通过 |
 | 包名核实（x86_64 / aarch64_cortex-a53 / aarch64_generic） | ✅ 逐包核对过 feed |
 | 重构后 CI 构建（rescue、standard、full、vm、gl-mt2500 lite） | ✅ 全部通过，产物 SHA256/BUILDINFO/manifest 校验通过（`docs/validation.md`） |
 | QEMU 启动冒烟（rescue、standard） | ✅ 12 项检查 + 冷启动持久化通过 |
@@ -55,7 +55,14 @@ git tag v25.12.2 && git push origin v25.12.2
 # 本地解析/校验（不需要构建）
 python3 scripts/resolve.py check --target x86-64 --preset standard
 python3 scripts/resolve.py matrix --event tag | python3 -m json.tool
-python3 tests/test_resolve.py -v
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+
+# 产物校验（SHA256SUMS / BUILDINFO / manifest）
+python3 tests/verify_artifacts.py dist
+
+# QEMU 冒烟（Windows 原生 QEMU 也可以；无 KVM 时用 TCG）
+python3 tests/qemu_smoke.py --image firmware.img --log smoke.log
+python3 tests/qemu_runtime.py --image standard.img --log runtime.log
 
 # 本地构建（Linux；需要 zstd qemu-utils genisoimage python3-yaml）
 TARGET_NAME=gl-mt2500 PRESET=lite bash scripts/build.sh
@@ -74,6 +81,11 @@ scripts/resolve.py      解析器，唯一真相：冲突/requires/目标兼容/
 scripts/thirdparty.py   下载 → sha256 校验 → 解包成 apk 本地仓库，或写二进制到覆盖层
 scripts/build.sh        编排：resolve → IB → 第三方 → make image → 产物与元数据
 tests/test_resolve.py   解析器单测
+tests/test_build_plan.py 解析器/build.sh 契约、预设与 ARM 产物回归
+tests/test_module_scripts.py 设备端 shell/UI 静态回归（BusyBox、脱敏、回滚）
+tests/verify_artifacts.py 构建产物完整性校验
+tests/qemu_smoke.py     QEMU 启动冒烟（串口控制台）
+tests/qemu_runtime.py   QEMU 内 proxy-switch / watchdog / 向导 / 诊断测试
 ```
 
 产物命名：`immortalwrt-<ver>-<target>-<preset>-<格式>`，元数据

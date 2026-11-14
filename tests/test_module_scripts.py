@@ -48,18 +48,18 @@ class BusyBoxCompatTests(unittest.TestCase):
             offenders.append("scripts/diagnostics/network-doctor.sh")
         self.assertEqual(offenders, [], "here-strings are not BusyBox-ash compatible")
 
-    def test_nounset_scripts_survive_functions_sh(self):
-        # /lib/functions.sh dereferences IPKG_INSTROOT while being sourced. With
-        # `set -u` that aborts the daemon at startup (the proxy-guard watchdog
-        # died this way and the guard silently stopped working).
+    def test_functions_sh_scripts_avoid_nounset(self):
+        # /lib/functions.sh (config_load/config_get) dereferences
+        # CONFIG_LIST_STATE / IPKG_INSTROOT; `set -u` aborts the daemon at
+        # startup. The proxy-guard watchdog died this way and fail-open never
+        # engaged, so scripts sourcing functions.sh must not enable nounset.
         offenders = []
         for path in module_shell_files():
             with open(path, encoding="utf-8") as fh:
                 text = fh.read()
-            if "set -u" in text and ". /lib/functions.sh" in text:
-                if "IPKG_INSTROOT" not in text:
-                    offenders.append(os.path.relpath(path, ROOT))
-        self.assertEqual(offenders, [], "set -u + functions.sh needs IPKG_INSTROOT")
+            if ". /lib/functions.sh" in text and "set -u" in text:
+                offenders.append(os.path.relpath(path, ROOT))
+        self.assertEqual(offenders, [], "set -u + functions.sh is unstable")
 
     def test_module_scripts_avoid_bash_arrays(self):
         import re
