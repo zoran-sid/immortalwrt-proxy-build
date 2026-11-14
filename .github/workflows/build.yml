@@ -104,6 +104,8 @@ jobs:
         run: |
           ls -lh dist/images | head -40
           cat dist/BUILDINFO-*.txt
+      - name: Verify artifact integrity
+        run: python3 tests/verify_artifacts.py dist
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: firmware-${{ needs.plan.outputs.version }}-${{ matrix.target }}-${{ matrix.preset }}
