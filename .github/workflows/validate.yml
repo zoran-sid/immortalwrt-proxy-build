@@ -54,8 +54,8 @@ jobs:
           print('yaml/json checked', 'OK' if not bad else 'FAILED')
           sys.exit(bad)
           PY
-      - name: Resolver unit tests
-        run: python3 tests/test_resolve.py -v
+      - name: Resolver and build-plan tests
+        run: python3 -m unittest discover -s tests -p 'test_*.py' -v
       - name: Resolve every ready target
         run: |
           set -e
