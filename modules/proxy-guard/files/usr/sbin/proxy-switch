@@ -3,6 +3,10 @@
 #
 # 只允许一个代理前端处于启用状态：停用其余前端、清理其残留 nftables 表，
 # 再启用目标前端。失败时返回非 0，不静默吞掉错误。
+#
+# 安全语义：目标前端不存在时在改动任何状态之前就失败；目标前端启动失败时
+# 尝试恢复切换前的前端，恢复不了就把 active 记为 off，保证不会留下
+# "UCI 说 A 在跑、实际没有任何代理" 的假象。
 set -u
 
 ACTIVE="${1:-}"
@@ -17,6 +21,7 @@ esac
 [ "${2:-}" = "--keep-record" ] && KEEP=1
 
 SVCS="passwall homeproxy nikki openclash"
+LOCK=/var/lock/proxy-switch.lock
 
 log() { logger -t proxy-switch "$*"; }
 
@@ -36,7 +41,12 @@ set_enabled() {
 	key="$(uci_enabled_key "$1")"
 	[ -n "$key" ] || return 0
 	uci -q set "$key=$2" 2>/dev/null || true
-	uci -q commit "${1}" 2>/dev/null || true
+	uci -q commit "$1" 2>/dev/null || true
+}
+
+record_active() {
+	uci -q set "proxy-guard.main.active=$1" 2>/dev/null || true
+	uci -q commit proxy-guard 2>/dev/null || true
 }
 
 cleanup_tables() {
@@ -48,6 +58,30 @@ cleanup_tables() {
 		fi
 	done
 }
+
+# Serialise concurrent switches (UI + watchdog + first-boot hook). A stale lock
+# from a killed process is dropped after 5 minutes.
+if ! mkdir "$LOCK" 2>/dev/null; then
+	if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +5 2>/dev/null)" ]; then
+		log "removing stale lock $LOCK"
+		rmdir "$LOCK" 2>/dev/null
+	fi
+	if ! mkdir "$LOCK" 2>/dev/null; then
+		echo "proxy-switch: another switch is in progress" >&2
+		exit 3
+	fi
+fi
+trap 'rmdir "$LOCK" 2>/dev/null' EXIT INT TERM
+
+PREV="$(uci -q get proxy-guard.main.active 2>/dev/null)"
+
+# Check the target before touching anything: switching to a frontend that is
+# not installed must not disable the working one.
+if [ "$ACTIVE" != "off" ] && ! svc_installed "$ACTIVE"; then
+	log "service $ACTIVE is not installed; nothing changed"
+	echo "proxy-switch: $ACTIVE is not installed" >&2
+	exit 1
+fi
 
 for s in $SVCS; do
 	[ "$s" = "$ACTIVE" ] && continue
@@ -61,24 +95,32 @@ done
 cleanup_tables
 
 if [ "$ACTIVE" != "off" ]; then
-	if ! svc_installed "$ACTIVE"; then
-		log "service $ACTIVE is not installed"
-		echo "proxy-switch: $ACTIVE is not installed" >&2
-		exit 1
-	fi
 	log "enabling $ACTIVE"
 	set_enabled "$ACTIVE" 1
 	/etc/init.d/"$ACTIVE" enable >/dev/null 2>&1
 	if ! /etc/init.d/"$ACTIVE" restart >/dev/null 2>&1; then
 		log "failed to start $ACTIVE"
-		echo "proxy-switch: failed to start $ACTIVE" >&2
+		/etc/init.d/"$ACTIVE" stop >/dev/null 2>&1
+		cleanup_tables
+		if [ -n "$PREV" ] && [ "$PREV" != "off" ] && [ "$PREV" != "$ACTIVE" ] && svc_installed "$PREV"; then
+			log "restoring previous frontend $PREV"
+			set_enabled "$PREV" 1
+			/etc/init.d/"$PREV" enable >/dev/null 2>&1
+			if /etc/init.d/"$PREV" restart >/dev/null 2>&1; then
+				[ "$KEEP" -eq 1 ] || record_active "$PREV"
+				echo "proxy-switch: failed to start $ACTIVE, restored $PREV" >&2
+				exit 1
+			fi
+			log "could not restore $PREV either"
+		fi
+		[ "$KEEP" -eq 1 ] || record_active off
+		echo "proxy-switch: failed to start $ACTIVE; direct routing left active" >&2
 		exit 1
 	fi
 fi
 
 if [ "$KEEP" -eq 0 ]; then
-	uci -q set "proxy-guard.main.active=$ACTIVE" 2>/dev/null || true
-	uci -q commit proxy-guard 2>/dev/null || true
+	record_active "$ACTIVE"
 fi
 
 log "active=$ACTIVE"

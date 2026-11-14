@@ -36,6 +36,16 @@ python3 "$REPO_ROOT/scripts/resolve.py" "${resolve_args[@]}"
 source "$PLAN_ENV"
 [ -n "$ROOTFS_OVERRIDE" ] && ROOTFS_PARTSIZE="$ROOTFS_OVERRIDE"
 
+# Fail in seconds, not after a 20-minute build, if the resolver/build.sh contract
+# drifts (run 43551668831 died at the very end because PRESET_KIND was missing).
+for required in TARGET_NAME TARGET SUBTARGET PROFILE ARCH TARGET_KIND \
+                ROOTFS_PARTSIZE PRESET_NAME PRESET_KIND PRESET_PROXY \
+                MODULE_LIST PACKAGES; do
+  if [[ -z "${!required+x}" ]]; then
+    die "resolve.py did not emit $required in $PLAN_ENV"
+  fi
+done
+
 TARGET_DASH="${TARGET}-${SUBTARGET}"
 BASE_URL="${MIRROR}/releases/${VERSION}/targets/${TARGET}/${SUBTARGET}"
 IB_NAME="immortalwrt-imagebuilder-${VERSION}-${TARGET_DASH}.Linux-x86_64.tar.zst"
@@ -75,24 +85,13 @@ source "$TP_ENV"
 
 PKGS="$PACKAGES"
 if [[ -n "${TP_REPOS_DIRS:-}" ]]; then
-  shopt -s nullglob
-  staged=0
-  for repo in $TP_REPOS_DIRS; do
-    [[ -d "$repo" ]] || die "third-party repo directory missing: $repo"
-    for apk in "$repo"/*.apk; do
-      cp -f "$apk" "$IB_DIR/packages/"
-      staged=$((staged + 1))
-    done
-  done
-  shopt -u nullglob
-  (( staged > 0 )) || die "third-party repo contained no .apk files"
-  # Rebuild the ImageBuilder's own package index so the extra apks become
-  # resolvable. This is exactly the command its `package_index` target runs;
-  # appending to `repositories` is NOT enough for apk to see them.
-  log "staged $staged third-party apk files, rebuilding package index"
-  ( cd "$IB_DIR/packages" && "$IB_DIR/staging_dir/host/bin/apk" mkndx \
-      --allow-untrusted --output packages.adb ./*.apk ) \
-    || die "apk mkndx failed"
+  # A local apk index rebuilt from third-party apks is unsigned and the
+  # ImageBuilder verifies package indexes, so apk rejects it. The old workaround
+  # disabled signature verification for the *whole* build, which is not an
+  # acceptable trade-off. Refuse before touching the index until the local
+  # repository can be signed (AGENTS.md §7.14). Third-party *binaries* (overlay)
+  # are unaffected.
+  die "third-party apk repositories need a signed package index (see AGENTS.md §7.14); refusing to disable apk signature checks"
 fi
 if [[ -n "${TP_PACKAGES:-}" ]]; then
   PKGS="$PKGS $TP_PACKAGES"
@@ -106,10 +105,6 @@ fi
 log "building image"
 cd "$IB_DIR"
 make_args=(image "PROFILE=$PROFILE" "PACKAGES=$PKGS" "ROOTFS_PARTSIZE=$ROOTFS_PARTSIZE")
-# The ImageBuilder ships CONFIG_SIGNATURE_CHECK=y, so its apk invocations omit
-# --allow-untrusted and reject our rebuilt (unsigned) package index. A
-# command-line assignment overrides .config for the whole make run.
-make_args+=("CONFIG_SIGNATURE_CHECK=")
 if [[ -n "$(find "$OVERLAY" -type f -print -quit 2>/dev/null)" ]]; then
   make_args+=("FILES=$OVERLAY")
 fi
@@ -121,18 +116,31 @@ BIN_DIR="$IB_DIR/bin/targets/$TARGET/$SUBTARGET"
 log "collecting images"
 OUT_PREFIX="immortalwrt-${VERSION}-${TARGET_NAME}-${PRESET_NAME}"
 IB_PREFIX="immortalwrt-${VERSION}-${TARGET_DASH}-"
+# `dist/` is shared by every local build. Drop only this target/preset's
+# previous outputs so a stale image can never end up in the new checksums or
+# be mistaken for a fresh artifact (CI starts from a clean checkout, but local
+# rebuilds do not).
+find "$OUTDIR/images" -maxdepth 1 -type f \
+  \( -name "${OUT_PREFIX}-*" -o -name "${OUT_PREFIX}.manifest" \) -delete
 shopt -s nullglob
 copied=0
+# x86 produces disk images/ISOs, rockchip produces .img.gz, mediatek/filogic
+# glinet devices produce .bin (sysupgrade/factory) and some targets use .itb.
+# Bootloader/initramfs artefacts (preloader, u-boot/fip, *-kernel) are not
+# installable firmware and are skipped.
 for f in "$BIN_DIR"/*.img.gz "$BIN_DIR"/*.qcow2 "$BIN_DIR"/*.vmdk \
-         "$BIN_DIR"/*.vhdx "$BIN_DIR"/*.vdi "$BIN_DIR"/*.iso; do
+         "$BIN_DIR"/*.vhdx "$BIN_DIR"/*.vdi "$BIN_DIR"/*.iso \
+         "$BIN_DIR"/*.itb "$BIN_DIR"/*.bin "$BIN_DIR"/*.ubi; do
   name="$(basename "$f")"
-  case "$name" in *rootfs*|*kernel*) continue ;; esac
+  case "$name" in
+    *rootfs*|*kernel*|*initramfs*|*preloader*|*u-boot*|*uboot*|*.fip) continue ;;
+  esac
   rest="${name#"$IB_PREFIX"}"
   rest="${rest#"${PROFILE}"-}"
   cp -f "$f" "$OUTDIR/images/${OUT_PREFIX}-${rest}"
   copied=$((copied + 1))
 done
-(( copied > 0 )) || die "no comparable images produced"
+(( copied > 0 )) || die "no comparable images produced under $BIN_DIR"
 
 # `make image` does not emit a manifest; read the installed-package database
 # from the assembled rootfs instead of rebuilding it with `make manifest`.
@@ -150,9 +158,14 @@ fi
 
 log "writing metadata"
 META="${VERSION}-${TARGET_NAME}-${PRESET_NAME}"
+# Checksum only this build's files. Summing `dist/images/*` used to pick up
+# images from other targets when several builds shared one dist/ directory.
+mapfile -t product_files < <(find "$OUTDIR/images" -maxdepth 1 -type f \
+  \( -name "${OUT_PREFIX}-*" -o -name "${OUT_PREFIX}.manifest" \) -printf '%f\n' | sort)
+(( ${#product_files[@]} > 0 )) || die "no product files to checksum"
 (
   cd "$OUTDIR/images"
-  sha256sum -- * > "$OUTDIR/SHA256SUMS-${META}.txt"
+  sha256sum -- "${product_files[@]}" > "$OUTDIR/SHA256SUMS-${META}.txt"
 )
 TP_INFO="$(python3 - "$PLAN_ENV.json" <<'PY'
 import json, sys

@@ -320,6 +320,7 @@ def emit_env(plan, out, overlay):
         "TARGET_KIND=%s" % env_quote(plan["target"].get("kind", "baremetal")),
         "ROOTFS_PARTSIZE=%s" % env_quote(plan["rootfs_partsize"]),
         "PRESET_NAME=%s" % env_quote(plan["preset_name"]),
+        "PRESET_KIND=%s" % env_quote(plan["preset_kind"]),
         "PRESET_PROXY=%s" % env_quote(plan["proxy_default"]),
         "MODULE_LIST=%s" % env_quote(" ".join(plan["modules"])),
         "PACKAGES=%s" % env_quote(" ".join(plan["packages"])),
