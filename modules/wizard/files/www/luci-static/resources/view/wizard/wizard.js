@@ -170,7 +170,6 @@ return view.extend({
 					E('select', { 'id': 'wiz_proxy', 'class': 'cbi-input-select' }, [
 						E('option', { 'value': 'homeproxy', 'selected': state.proxy === 'homeproxy' ? 'selected' : null }, [ 'HomeProxy（推荐 ARM）' ]),
 						E('option', { 'value': 'passwall', 'selected': state.proxy === 'passwall' ? 'selected' : null }, [ 'PassWall（推荐 x86）' ]),
-						E('option', { 'value': 'nikki', 'selected': state.proxy === 'nikki' ? 'selected' : null }, [ 'Nikki（Mihomo）' ]),
 						E('option', { 'value': 'off', 'selected': state.proxy === 'off' ? 'selected' : null }, [ '暂不启用' ])
 					])
 				]), '切换时会停用其它前端，并清理其残留规则。'),
@@ -282,6 +281,10 @@ return view.extend({
 								ui.addNotification(null, E('p', [ '应用失败：' + (res.stderr || res.stdout || '未知错误') ]), 'danger');
 								ev.target.disabled = false;
 								return;
+							}
+							var out = String(res.stdout || '');
+							if (out.indexOf('warning:') >= 0) {
+								ui.addNotification(null, E('p', [ out.trim() ]), 'warning');
 							}
 							self.showConfirm();
 						}).catch(function(err) {

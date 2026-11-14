@@ -1,9 +1,14 @@
 #!/bin/sh
 # proxy-guard-watchdog — 分级探测 + fail-open 恢复。
 #
-# 不是"挂了就重启"：连续失败达到阈值后按 policy 处理。
-#   policy=open   停用代理、恢复直连（fail-open），冷却 recover_delay 秒后尝试切回
-#   policy=closed 保留代理原状，只记录和通知，不静默放行直连
+# 设计要点（踩过的坑）：
+#   * 不再把"某个探针不可达"当成代理故障：DNS 用多个上游轮询，HTTP 用
+#     国内基线与国外探针分开判断。只有"基线通、国外探针失败"才计为代理故障。
+#   * fail-open 之后不能继续用国外探针判断"是否恢复"——代理关掉时国外探针
+#     本来就不可达，旧逻辑会永久卡在直连。恢复流程是：等待 recover_delay →
+#     重新启用代理 → 验证 → 验证失败则回到直连并指数退避。
+#   * policy=open   ：连续故障达阈值后停用代理、恢复直连，并周期重试。
+#   * policy=closed ：保留代理原状，只记录/通知，不放行直连。
 set -u
 . /lib/functions.sh
 
@@ -12,8 +17,10 @@ config_get POLICY main policy open
 config_get INTERVAL main interval 60
 config_get FAILS main fail_threshold 3
 config_get RECOVER_DELAY main recover_delay 600
+config_get RECOVER_MAX main recover_max 3600
 config_get PROBE main probe_url 'http://www.gstatic.com/generate_204'
-config_get DNS main probe_dns '223.5.5.5'
+config_get CN_PROBE main probe_cn 'http://connect.rom.miui.com/generate_204'
+config_get PROBE_DNS main probe_dns '223.5.5.5 1.1.1.1'
 config_get NOTIFY main notify 1
 
 log() { logger -t proxy-guard "$*"; }
@@ -24,64 +31,163 @@ notify() {
 	wechatpush send "ImmortalWrt 代理状态" "$1" >/dev/null 2>&1 || true
 }
 
-probe_dns() { nslookup www.baidu.com "$DNS" >/dev/null 2>&1; }
-
-probe_http() {
-	code="$(curl -s -o /dev/null -m 8 -w '%{http_code}' "$PROBE" 2>/dev/null)"
-	[ "$code" = "204" ] || [ "$code" = "200" ]
+set_state() {
+	[ "$(uci -q get proxy-guard.main.state 2>/dev/null)" = "$1" ] && return 0
+	uci -q set "proxy-guard.main.state=$1" 2>/dev/null || true
+	uci -q commit proxy-guard 2>/dev/null || true
 }
 
-healthy() { probe_dns && probe_http; }
+# fetch_code URL -> HTTP status, or 000. curl/uclient-fetch/wget, whichever exists.
+fetch_code() {
+	url="$1"
+	if command -v curl >/dev/null 2>&1; then
+		curl -4 -s -o /dev/null -m 8 -w '%{http_code}' "$url" 2>/dev/null || echo 000
+	elif command -v uclient-fetch >/dev/null 2>&1; then
+		if uclient-fetch -q -T 8 -O /dev/null "$url" >/dev/null 2>&1; then
+			echo 200
+		else
+			echo 000
+		fi
+	elif command -v wget >/dev/null 2>&1; then
+		if wget -q -T 8 -O /dev/null "$url" >/dev/null 2>&1; then
+			echo 200
+		else
+			echo 000
+		fi
+	else
+		echo 000
+	fi
+}
+
+http_ok() {
+	case "$(fetch_code "$1")" in
+		2??) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+# External resolvers: any one answering is enough. A single blocked resolver
+# (223.5.5.5 outside mainland China, 1.1.1.1 inside it) must not fail the check.
+dns_ok() {
+	for server in $PROBE_DNS; do
+		if nslookup www.baidu.com "$server" >/dev/null 2>&1; then
+			return 0
+		fi
+	done
+	return 1
+}
+
+# Baseline = "this link still reaches the internet at all", independent of the
+# proxy. Used to avoid flipping the proxy during a genuine WAN outage.
+baseline_ok() {
+	http_ok "$CN_PROBE" && return 0
+	dns_ok && return 0
+	return 1
+}
 
 active_proxy() { uci -q get proxy-guard.main.active 2>/dev/null; }
 
+stop_proxy() { /usr/sbin/proxy-switch off --keep-record >/dev/null 2>&1; }
+
 trap 'log "watchdog stopping"; exit 0' TERM INT
 
-log "started policy=$POLICY interval=${INTERVAL}s threshold=$FAILS"
+log "started policy=$POLICY interval=${INTERVAL}s threshold=$FAILS recover=${RECOVER_DELAY}s"
 fails=0
 mode=normal
 failopen_since=0
-backoff=$INTERVAL
+next_recover=0
+backoff="$INTERVAL"
 
 while :; do
-	if healthy; then
-		fails=0
-		backoff=$INTERVAL
-		if [ "$mode" = "failopen" ]; then
-			now="$(date +%s)"
-			if [ $((now - failopen_since)) -ge "$RECOVER_DELAY" ]; then
-				proxy="$(active_proxy)"
-				if [ -n "$proxy" ] && [ "$proxy" != "off" ]; then
-					log "recovery window elapsed, re-enabling $proxy"
-					if /usr/sbin/proxy-switch "$proxy" >/dev/null 2>&1; then
-						mode=normal
-					fi
-				else
-					mode=normal
-				fi
+	proxy="$(active_proxy)"
+	now="$(date +%s)"
+
+	if [ "$mode" = "failopen" ]; then
+		if [ -z "$proxy" ] || [ "$proxy" = "off" ]; then
+			log "fail-open state but no proxy recorded; back to monitoring"
+			mode=normal
+			fails=0
+			set_state normal
+			sleep "$INTERVAL"
+			continue
+		fi
+		if [ $((now - failopen_since)) -lt "$next_recover" ]; then
+			sleep "$INTERVAL"
+			continue
+		fi
+
+		log "recovery attempt: re-enabling $proxy"
+		if /usr/sbin/proxy-switch "$proxy" >/dev/null 2>&1; then
+			sleep 8
+			if http_ok "$PROBE"; then
+				mode=normal
+				fails=0
+				backoff="$INTERVAL"
+				set_state normal
+				notify "代理已恢复：重新启用 $proxy"
+				log "recovered, proxy=$proxy"
+			else
+				log "recovery failed, returning to direct routing"
+				stop_proxy
+				failopen_since="$(date +%s)"
+				backoff=$((backoff * 2))
+				[ "$backoff" -gt "$RECOVER_MAX" ] && backoff="$RECOVER_MAX"
+				next_recover="$backoff"
+				notify "代理恢复失败，继续直连（下次重试 ${backoff}s 后）"
 			fi
+		else
+			log "proxy-switch failed during recovery; retrying later"
+			failopen_since="$(date +%s)"
+			backoff=$((backoff * 2))
+			[ "$backoff" -gt "$RECOVER_MAX" ] && backoff="$RECOVER_MAX"
+			next_recover="$backoff"
 		fi
 		sleep "$INTERVAL"
 		continue
 	fi
 
+	# normal monitoring
+	if [ -z "$proxy" ] || [ "$proxy" = "off" ]; then
+		sleep "$INTERVAL"
+		continue
+	fi
+
+	if http_ok "$PROBE"; then
+		fails=0
+		sleep "$INTERVAL"
+		continue
+	fi
+
+	if ! baseline_ok; then
+		# The link itself is down. Neither "proxy broken" nor "proxy fine" can
+		# be concluded, so do not rewrite the proxy state.
+		log "baseline network down; keeping proxy state"
+		sleep "$INTERVAL"
+		continue
+	fi
+
 	fails=$((fails + 1))
-	log "probe failed ($fails/$FAILS)"
+	log "proxy probe failed ($fails/$FAILS)"
 	if [ "$fails" -ge "$FAILS" ]; then
 		if [ "$POLICY" = "closed" ]; then
 			log "fail-closed: keeping proxy state, not bypassing"
+			set_state closed
 			notify "代理异常，按 fail-closed 策略不放行直连"
-		else
-			log "fail-open: disabling proxy, restoring direct routing"
-			/usr/sbin/proxy-switch off --keep-record >/dev/null 2>&1
-			notify "代理异常，已切到直连（fail-open）"
-			mode=failopen
-			failopen_since="$(date +%s)"
+			# Do not notify every minute while the outage lasts.
+			fails=0
+			sleep 1800
+			continue
 		fi
+		log "fail-open: disabling proxy, restoring direct routing"
+		stop_proxy
+		mode=failopen
+		failopen_since="$(date +%s)"
+		next_recover="$RECOVER_DELAY"
+		backoff="$RECOVER_DELAY"
+		set_state failopen
+		notify "代理异常，已切到直连（fail-open），${RECOVER_DELAY}s 后尝试恢复"
 		fails=0
 	fi
 
-	sleep "$backoff"
-	backoff=$((backoff * 2))
-	[ "$backoff" -gt 1800 ] && backoff=1800
+	sleep "$INTERVAL"
 done
