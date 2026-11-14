@@ -1,0 +1,27 @@
+name: full
+description: 完整套餐：standard + 高级监控 + NAS + Docker（建议 2 GiB 以上存储、4 GiB 以上内存）
+targets: [x86-64, x86-64-vm, nanopi-r6s, nanopi-r76s]
+rootfs_partsize: 2048
+proxy_default:
+  arm: homeproxy
+  baremetal: passwall
+  vm: passwall
+modules:
+  - base
+  - nat
+  - proxy-passwall
+  - proxy-homeproxy
+  - proxy-nikki
+  - proxy-guard
+  - frp
+  - nps
+  - monitor-lite
+  - monitor-pro
+  - dns-adguardhome
+  - vpn-mesh
+  - remote-access
+  - qos
+  - notify
+  - nas
+  - docker
+  - wizard

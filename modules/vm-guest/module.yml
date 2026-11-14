@@ -1,0 +1,14 @@
+name: vm-guest
+description: 虚拟机增强：qemu-guest-agent、open-vm-tools（virtio/Hyper-V 网卡为内核内建，无独立 kmod）
+category: vm
+source: official
+conflicts: []
+requires: []
+targets:
+- x86-64-vm
+arch: []
+min_flash_mb: 0
+min_ram_mb: 0
+enabled_by_default: false
+implicit: true
+status: ok

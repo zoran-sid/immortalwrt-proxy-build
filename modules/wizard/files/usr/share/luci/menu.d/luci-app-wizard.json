@@ -1,0 +1,13 @@
+{
+	"admin/system/wizard": {
+		"title": "初始化向导",
+		"order": 5,
+		"action": {
+			"type": "view",
+			"path": "wizard/wizard"
+		},
+		"depends": {
+			"acl": [ "luci-app-wizard" ]
+		}
+	}
+}

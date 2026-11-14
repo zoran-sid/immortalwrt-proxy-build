@@ -1,0 +1,7 @@
+luci-app-tailscale-community
+tailscale
+luci-app-zerotier
+zerotier
+luci-proto-wireguard
+wireguard-tools
+kmod-wireguard

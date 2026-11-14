@@ -1,0 +1,4 @@
+luci-app-passwall
+luci-i18n-passwall-zh-cn
+xray-core
+sing-box

@@ -1,0 +1,15 @@
+name: dns-mosdns
+description: mosdns 分流解析核心（官方 feed 只有核心，无 LuCI 界面，配置走 /etc/mosdns）
+category: dns
+source: official
+conflicts:
+- dns-adguardhome
+- dns-smartdns
+requires: []
+targets: []
+arch: []
+min_flash_mb: 0
+min_ram_mb: 0
+enabled_by_default: false
+implicit: false
+status: ok

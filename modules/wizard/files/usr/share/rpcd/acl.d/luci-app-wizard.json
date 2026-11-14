@@ -1,0 +1,19 @@
+{
+	"luci-app-wizard": {
+		"description": "首次配置向导：网络、DHCP、代理前端切换",
+		"read": {
+			"ubus": {
+				"call": [ "service", "system", "network.interface", "file" ]
+			},
+			"uci": [ "wizard", "network", "dhcp", "firewall", "system", "proxy-guard" ]
+		},
+		"write": {
+			"uci": [ "wizard", "network", "dhcp", "firewall", "system", "proxy-guard",
+			         "adguardhome", "tailscale", "ddns-go" ],
+			"file": {
+				"/usr/libexec/wizard/*": [ "exec" ],
+				"/usr/sbin/proxy-switch": [ "exec" ]
+			}
+		}
+	}
+}

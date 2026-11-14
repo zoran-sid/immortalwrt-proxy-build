@@ -1,0 +1,7 @@
+config wizard 'main'
+	option done '0'
+	option applied '0'
+	option confirmed '0'
+	option scenario ''
+	option proxy ''
+	option lang 'zh_cn'

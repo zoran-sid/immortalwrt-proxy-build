@@ -1,0 +1,12 @@
+name: nanopi-r5s
+kind: arm
+arch: aarch64_generic
+target: rockchip
+subtarget: armv8
+profile: friendlyarm_nanopi-r5s
+rootfs_partsize: 1024
+flash_mb: 8192
+ram_mb: 2048
+status: ready
+device_url: https://openwrt.org/toh/friendlyarm/nanopi_r5s
+note: FriendlyARM NanoPi R5S

@@ -1,0 +1,14 @@
+name: monitor-pro
+description: netdata 实时面板与 Prometheus node exporter（较吃资源）
+category: monitor
+source: official
+conflicts: []
+requires:
+- monitor-lite
+targets: []
+arch: []
+min_flash_mb: 50
+min_ram_mb: 0
+enabled_by_default: false
+implicit: false
+status: ok

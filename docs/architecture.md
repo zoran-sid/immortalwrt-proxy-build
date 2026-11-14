@@ -2,17 +2,12 @@
 
 ## 为什么用 ImageBuilder 而不是源码编译
 
-源码编译（`make menuconfig` → `make -j$(nproc)`）在 GitHub 托管 runner 上：
+源码编译在 GitHub 托管 runner 上单次 1–3 小时，14GB 磁盘经常不够，缓存命中率低，
+失败点多。ImageBuilder 只做「解包 + 装 apk + 重新打包」，10 分钟完成，产物与官方
+发布同源同内核，插件 ABI 不会错配。
 
-- 单次 1–3 小时，14GB 磁盘常不够，需要先删预装 SDK；
-- 缓存难做对，`dl/` 与 toolchain 体积大、命中率低；
-- 失败点多（feed 更新、上游 patch），排障成本高。
-
-ImageBuilder 只做"解包 + 装 ipk/apk + 重新打包"，5–10 分钟完成，
-并且产物与官方发布同源同内核，插件 ABI 不会错配。
-
-代价：不能改内核编译选项、不能裁 busybox、不能打源码补丁。
-真需要这些时再切源码编译，仓库结构不影响。
+代价：不能改内核编译选项、不能裁 busybox、不能打源码补丁。真需要时再切源码编译，
+`targets/` 与 `modules/` 的数据结构不影响这件事。
 
 ## 数据流
 
@@ -20,42 +15,59 @@ ImageBuilder 只做"解包 + 装 ipk/apk + 重新打包"，5–10 分钟完成�
 workflow_dispatch / tag
         │
         ▼
-   plan job ── matrix: [passwall, openclash, none]
+  resolve.py matrix ── 生成 target × preset 矩阵（tag 14 个组合）
         │
         ▼
- build job (per profile)
-   scripts/build.sh
-     ├── 下载 sha256sums + ImageBuilder (.tar.zst)
-     ├── 校验 SHA256
-     ├── 合并 configs/common + configs/proxy/<p> 包清单
-     ├── make image PROFILE=generic PACKAGES=... ROOTFS_PARTSIZE=1024
-     └── 收集 img.gz/qcow2/vmdk + manifest + SHA256SUMS + BUILDINFO
+  build job (per combination)
+    scripts/build.sh
+      ├── resolve.py     冲突/requires/目标兼容/体积预算 → 包列表 + files 覆盖层
+      ├── 下载 ImageBuilder + sha256 校验（按 target/subtarget）
+      ├── thirdparty.py  下载并校验第三方 → 解包成 apk 本地仓库 / 写二进制
+      ├── 往 IB 的 repositories 追加本地仓库路径
+      ├── make image PROFILE=... PACKAGES=... FILES=overlay ROOTFS_PARTSIZE=...
+      └── 收集镜像 + manifest + SHA256SUMS + BUILDINFO
         │
         ▼
- upload-artifact（每个 profile 一个）
+ upload-artifact（每个组合一个，名字带 target/preset）
         │
         ▼（可选）
  release job → gh release create/upload
 ```
 
+## 模块与预设的关系
+
+- 模块是「一组包 + 可选文件覆盖」，声明冲突、依赖、适用目标与最小体积。
+- 预设是「模块有序列表 + 适用目标 + 默认代理 + rootfs 大小」。
+- 解析器是唯一真相：CI 与本地构建走同一份逻辑，配置错误在下载 ImageBuilder 之前就失败。
+- `implicit` 模块（x86 网卡驱动、虚拟机增强）不进预设，按 arch/target 自动附加。
+- 只要选了任一代理前端，解析器会自动补 `proxy-guard`，保证「可共存、只启用一个」不被绕过。
+
+## 代理互斥与 fail-open
+
+`proxy-guard` 提供三样东西：
+
+1. 首启 uci-defaults：按预设的默认前端启用一个，其余停用。
+2. `/usr/sbin/proxy-switch <passwall|homeproxy|nikki|off>`：停用其余、清理残留 nft 表、
+   再启用目标；失败返回非 0。
+3. procd 看门狗：DNS + HTTP 204 双探针，连续失败达阈值后按 policy 处理。
+   `open`（默认）停用代理恢复直连，冷却后再尝试切回；`closed` 保留原状只告警。
+
+所有重启/切换都有退避，没有 `while true; do restart; done`。
+
 ## 版本固定
 
 | 组件 | 固定方式 |
 |---|---|
-| ImmortalWrt | `VERSION` 输入 + ImageBuilder 的 `sha256sums` 校验 |
-| 插件 | 随该 release 的官方 feed，不额外引第三方 ipk |
-| Action | 官方 action 全部 pin 到 commit SHA |
+| ImmortalWrt | `version` 输入 + ImageBuilder `sha256sums` 校验 |
+| 官方插件 | 随该 release 的 feed，天然可复现 |
+| 第三方 | `thirdparty/lock.yml` 的 tag + 每 arch url + sha256，构建时逐个校验 |
+| Action | 官方 action 全部 pin commit SHA |
 
-上游 25.12.2 的 feed 指向固定 commit（见 `releases/25.12.2/packages/x86_64/feeds.conf`），
-所以同一个 `VERSION` 值天然可复现，不需要自己维护 feed lock。
+## 产物命名
 
-## 为什么不默认塞满功能
+`immortalwrt-<ver>-<target>-<preset>-<格式>`。custom 构建的 preset 是模块列表的短 hash，
+BUILDINFO 里保留完整模块列表，便于对照。
 
-镜像越大，升级越慢，出问题时变量越多。默认只装：LuCI、dnsmasq-full、curl、
-kmod-tun、kmod-nft-tproxy、nftables、conntrack、tcpdump，加一个代理前端。
-需要 ddns、frp、tailscale 时在 profile 的 `packages.txt` 里加一行即可。
+## 不预设的东西
 
-## 旁路由假设
-
-镜像不预设 LAN 网段、不预设 DHCP 角色。首次启动走 ImmortalWrt 默认
-`192.168.1.1`，登录后自己改。文档不假设你的主路由是 `192.168.1.0/24`。
+镜像不预设 LAN 网段、不预设 DHCP 角色、不写订阅。这些全部交给首次向导或用户自己改。

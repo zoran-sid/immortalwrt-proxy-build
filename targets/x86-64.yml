@@ -1,0 +1,12 @@
+name: x86-64
+kind: baremetal
+arch: x86_64
+target: x86
+subtarget: "64"
+profile: generic
+rootfs_partsize: 1024
+flash_mb: 16384
+ram_mb: 2048
+status: ready
+boot: UEFI + legacy BIOS
+note: 物理软路由 / 任意 x86 主机

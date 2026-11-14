@@ -1,0 +1,9 @@
+#!/bin/sh
+# 确保向导状态段存在；不动用户已完成的配置。
+[ -f /etc/config/wizard ] || exit 0
+if ! uci -q get wizard.main >/dev/null 2>&1; then
+	uci set wizard.main=wizard
+	uci set wizard.main.done='0'
+	uci commit wizard
+fi
+exit 0

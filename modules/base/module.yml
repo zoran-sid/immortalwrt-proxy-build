@@ -1,0 +1,13 @@
+name: base
+description: 基础系统：LuCI、中文语言包、Argon 主题、dnsmasq-full、nftables、TProxy/FullCone 内核模块、ttyd、在线升级
+category: base
+source: official
+conflicts: []
+requires: []
+targets: []
+arch: []
+min_flash_mb: 0
+min_ram_mb: 0
+enabled_by_default: true
+implicit: false
+status: ok

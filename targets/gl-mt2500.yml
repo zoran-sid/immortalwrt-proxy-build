@@ -1,0 +1,12 @@
+name: gl-mt2500
+kind: arm
+arch: aarch64_cortex-a53
+target: mediatek
+subtarget: filogic
+profile: glinet_gl-mt2500
+rootfs_partsize: 1024
+flash_mb: 8192
+ram_mb: 1024
+status: ready
+device_url: https://openwrt.org/toh/gl.inet/gl-mt2500
+note: GL.iNet Brume 2 (MaxLinear PHY 版本)

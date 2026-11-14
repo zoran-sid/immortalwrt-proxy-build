@@ -1,0 +1,3 @@
+kmod-r8125
+kmod-r8126
+kmod-igc

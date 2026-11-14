@@ -1,0 +1,12 @@
+name: nanopi-r6s
+kind: arm
+arch: aarch64_generic
+target: rockchip
+subtarget: armv8
+profile: friendlyarm_nanopi-r6s
+rootfs_partsize: 1024
+flash_mb: 16384
+ram_mb: 4096
+status: ready
+device_url: https://openwrt.org/toh/friendlyarm/nanopi_r6s
+note: FriendlyARM NanoPi R6S，可跑 full 预设

@@ -1,0 +1,12 @@
+luci-app-nlbwmon
+luci-app-vnstat2
+luci-app-statistics
+collectd
+collectd-mod-cpu
+collectd-mod-memory
+collectd-mod-load
+collectd-mod-interface
+collectd-mod-df
+collectd-mod-conntrack
+collectd-mod-ping
+collectd-mod-uptime

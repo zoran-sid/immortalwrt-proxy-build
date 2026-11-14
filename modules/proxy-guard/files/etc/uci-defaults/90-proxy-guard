@@ -1,0 +1,17 @@
+#!/bin/sh
+# 首次启动：按预设只启用一个代理前端。向导完成后不再干预。
+[ -x /usr/sbin/proxy-switch ] || exit 0
+[ -f /etc/config/proxy-guard ] || exit 0
+
+. /lib/functions.sh
+config_load proxy-guard
+config_get def main default passwall
+
+if [ "$(uci -q get wizard.main.done 2>/dev/null)" = "1" ]; then
+	exit 0
+fi
+
+logger -t proxy-guard "first boot: enabling default proxy '$def'"
+/usr/sbin/proxy-switch "$def" >/dev/null 2>&1
+
+exit 0

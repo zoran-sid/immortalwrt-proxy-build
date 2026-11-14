@@ -11,43 +11,107 @@ permissions:
 jobs:
   lint:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - name: Install shellcheck
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends shellcheck python3-yaml
+      - name: Install tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends shellcheck python3-yaml
       - name: Shellcheck
         run: |
           mapfile -t files < <(find scripts -type f -name '*.sh' | sort)
           printf '%s\n' "${files[@]}"
           shellcheck -x "${files[@]}"
-      - name: YAML parses
+      - name: Shell syntax of module scripts
+        run: |
+          set -e
+          while IFS= read -r f; do
+            case "$f" in
+              */etc/init.d/*) continue ;;
+              *) sh -n "$f" && echo "ok $f" ;;
+            esac
+          done < <(find modules -type f \( -name '*.sh' -o -path '*/uci-defaults/*' -o -path '*/usr/sbin/*' \))
+      - name: YAML and JSON parse
         run: |
           python3 - <<'PY'
-          import glob, sys, yaml
+          import glob, json, sys, yaml
           bad = 0
-          for f in glob.glob('.github/workflows/*.yml') + glob.glob('targets/*.yml'):
+          for f in glob.glob('.github/workflows/*.yml') + glob.glob('targets/*.yml') \
+                   + glob.glob('presets/*.yml') + glob.glob('modules/*/module.yml') \
+                   + glob.glob('thirdparty/*.yml'):
               try:
                   yaml.safe_load(open(f))
-                  print(f'ok   {f}')
               except Exception as e:
                   bad = 1
                   print(f'FAIL {f}: {e}')
+          for f in glob.glob('**/*.json', recursive=True):
+              try:
+                  json.load(open(f))
+              except Exception as e:
+                  bad = 1
+                  print(f'FAIL {f}: {e}')
+          print('yaml/json checked', 'OK' if not bad else 'FAILED')
           sys.exit(bad)
           PY
-      - name: Package lists are sanity-checked
+      - name: Resolver unit tests
+        run: python3 tests/test_resolve.py -v
+      - name: Resolve every ready target
         run: |
           set -e
-          for d in configs/common configs/proxy/*; do
-            test -f "$d/packages.txt" || { echo "missing $d/packages.txt"; exit 1; }
-          done
-          for p in passwall openclash homeproxy; do
-            grep -q '^luci-app-' "configs/proxy/$p/packages.txt" || { echo "$p: no luci-app entry"; exit 1; }
-          done
-          echo "package lists ok"
-      - name: Upstream release is reachable
+          python3 - <<'PY'
+          import subprocess, sys, yaml, glob
+          targets = []
+          for f in glob.glob('targets/*.yml'):
+              spec = yaml.safe_load(open(f))
+              if spec.get('status', 'ready') == 'ready':
+                  targets.append(spec['name'])
+          bad = 0
+          for t in sorted(targets):
+              r = subprocess.run([sys.executable, 'scripts/resolve.py', 'check',
+                                  '--target', t, '--preset', 'standard'],
+                                 capture_output=True, text=True)
+              if r.returncode != 0:
+                  # standard may legitimately not apply (lite-only devices)
+                  r = subprocess.run([sys.executable, 'scripts/resolve.py', 'check',
+                                      '--target', t, '--preset', 'lite'],
+                                     capture_output=True, text=True)
+              print(r.stdout.strip() or r.stderr.strip())
+              bad |= r.returncode != 0
+          sys.exit(bad)
+          PY
+
+  lock:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || contains(github.event.head_commit.modified, 'thirdparty/lock.yml') || contains(github.event.head_commit.added, 'thirdparty/lock.yml')
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Verify third-party digests
         run: |
-          set -e
-          V=25.12.2
-          curl -fsS --retry 2 -o /dev/null -w '%{http_code}\n' \
-            "https://downloads.immortalwrt.org/releases/$V/targets/x86/64/sha256sums"
+          python3 - <<'PY'
+          import hashlib, sys, urllib.request, yaml
+
+          UA = {'User-Agent': 'immortalwrt-proxy-build/1.0'}
+          lock = yaml.safe_load(open('thirdparty/lock.yml'))
+          bad = 0
+          for name, entry in (lock or {}).items():
+              for arch, spec in (entry.get('arches') or {}).items():
+                  url = spec['url']
+                  req = urllib.request.Request(url, headers=UA)
+                  try:
+                      with urllib.request.urlopen(req, timeout=180) as resp:
+                          h = hashlib.sha256()
+                          for chunk in iter(lambda: resp.read(1 << 20), b''):
+                              h.update(chunk)
+                      got = h.hexdigest()
+                  except Exception as exc:
+                      print(f'FAIL {name}/{arch}: {exc}')
+                      bad = 1
+                      continue
+                  if got != spec['sha256']:
+                      print(f'FAIL {name}/{arch}: sha256 {got} != {spec["sha256"]}')
+                      bad = 1
+                  else:
+                      print(f'ok   {name}/{arch}')
+          sys.exit(bad)
+          PY

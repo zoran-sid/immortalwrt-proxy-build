@@ -1,0 +1,12 @@
+name: x86-64-vm
+kind: vm
+arch: x86_64
+target: x86
+subtarget: "64"
+profile: generic
+rootfs_partsize: 1024
+flash_mb: 8192
+ram_mb: 2048
+status: ready
+boot: UEFI + legacy BIOS
+note: PVE / ESXi / Hyper-V / VirtualBox 虚拟机，自动附加 vm-guest 模块

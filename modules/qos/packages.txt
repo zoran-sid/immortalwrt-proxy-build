@@ -1,0 +1,3 @@
+luci-app-sqm
+sqm-scripts
+luci-app-appfilter

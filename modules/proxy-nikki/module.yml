@@ -1,0 +1,14 @@
+name: proxy-nikki
+description: Nikki：Mihomo 内核，TProxy/TUN + nftables 策略路由（第三方，锁 v1.26.2）
+category: proxy
+source: thirdparty
+conflicts: []
+requires: []
+targets: []
+arch: []
+min_flash_mb: 0
+min_ram_mb: 0
+enabled_by_default: false
+implicit: false
+status: ok
+thirdparty: nikki

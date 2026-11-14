@@ -1,0 +1,12 @@
+name: gl-mt2500-airoha
+kind: arm
+arch: aarch64_cortex-a53
+target: mediatek
+subtarget: filogic
+profile: glinet_gl-mt2500-airoha
+rootfs_partsize: 1024
+flash_mb: 8192
+ram_mb: 1024
+status: ready
+device_url: https://openwrt.org/toh/gl.inet/gl-mt2500
+note: 同型号的 Airoha PHY 版本，profile 不同，不要混刷

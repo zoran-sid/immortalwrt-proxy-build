@@ -1,0 +1,6 @@
+name: rescue
+description: 救援镜像：只有基础系统与 LuCI，不含任何代理前端，用于排障和恢复
+targets: [all]
+proxy_default: ""
+modules:
+  - base

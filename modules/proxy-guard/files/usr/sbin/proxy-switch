@@ -1,0 +1,85 @@
+#!/bin/sh
+# proxy-switch <passwall|homeproxy|nikki|openclash|off> [--keep-record]
+#
+# 只允许一个代理前端处于启用状态：停用其余前端、清理其残留 nftables 表，
+# 再启用目标前端。失败时返回非 0，不静默吞掉错误。
+set -u
+
+ACTIVE="${1:-}"
+KEEP=0
+case "$ACTIVE" in
+	passwall|homeproxy|nikki|openclash|off) ;;
+	*)
+		echo "usage: proxy-switch <passwall|homeproxy|nikki|openclash|off> [--keep-record]" >&2
+		exit 2
+		;;
+esac
+[ "${2:-}" = "--keep-record" ] && KEEP=1
+
+SVCS="passwall homeproxy nikki openclash"
+
+log() { logger -t proxy-switch "$*"; }
+
+svc_installed() { [ -x "/etc/init.d/$1" ]; }
+
+uci_enabled_key() {
+	case "$1" in
+		passwall)  echo 'passwall.@global[0].enabled' ;;
+		homeproxy) echo 'homeproxy.config.enabled' ;;
+		nikki)     echo 'nikki.@nikki[0].enabled' ;;
+		openclash) echo 'openclash.config.enable' ;;
+		*)         echo '' ;;
+	esac
+}
+
+set_enabled() {
+	key="$(uci_enabled_key "$1")"
+	[ -n "$key" ] || return 0
+	uci -q set "$key=$2" 2>/dev/null || true
+	uci -q commit "${1}" 2>/dev/null || true
+}
+
+cleanup_tables() {
+	for t in passwall homeproxy nikki openclash; do
+		if nft list table inet "$t" >/dev/null 2>&1; then
+			if nft delete table inet "$t" 2>/dev/null; then
+				log "removed stale nft table inet $t"
+			fi
+		fi
+	done
+}
+
+for s in $SVCS; do
+	[ "$s" = "$ACTIVE" ] && continue
+	svc_installed "$s" || continue
+	log "disabling $s"
+	set_enabled "$s" 0
+	/etc/init.d/"$s" stop >/dev/null 2>&1
+	/etc/init.d/"$s" disable >/dev/null 2>&1
+done
+
+cleanup_tables
+
+if [ "$ACTIVE" != "off" ]; then
+	if ! svc_installed "$ACTIVE"; then
+		log "service $ACTIVE is not installed"
+		echo "proxy-switch: $ACTIVE is not installed" >&2
+		exit 1
+	fi
+	log "enabling $ACTIVE"
+	set_enabled "$ACTIVE" 1
+	/etc/init.d/"$ACTIVE" enable >/dev/null 2>&1
+	if ! /etc/init.d/"$ACTIVE" restart >/dev/null 2>&1; then
+		log "failed to start $ACTIVE"
+		echo "proxy-switch: failed to start $ACTIVE" >&2
+		exit 1
+	fi
+fi
+
+if [ "$KEEP" -eq 0 ]; then
+	uci -q set "proxy-guard.main.active=$ACTIVE" 2>/dev/null || true
+	uci -q commit proxy-guard 2>/dev/null || true
+fi
+
+log "active=$ACTIVE"
+exit 0

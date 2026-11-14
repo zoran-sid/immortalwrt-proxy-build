@@ -1,0 +1,5 @@
+luci-app-samba4
+luci-app-diskman
+luci-app-openlist
+luci-app-hd-idle
+block-mount

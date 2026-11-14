@@ -1,0 +1,13 @@
+name: monitor-lite
+description: nlbwmon 流量统计、vnstat2 接口流量、collectd 基础指标
+category: monitor
+source: official
+conflicts: []
+requires: []
+targets: []
+arch: []
+min_flash_mb: 0
+min_ram_mb: 0
+enabled_by_default: true
+implicit: false
+status: ok

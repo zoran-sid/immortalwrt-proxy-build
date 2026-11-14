@@ -1,0 +1,15 @@
+name: wizard
+description: >-
+  首次登录向导：场景选择（主路由/旁路由/旅行网关）、管理密码、LAN 网段、
+  代理前端与订阅、可选 AdGuardHome/FullCone/Tailscale/DDNS，原子应用并可 90 秒回滚。
+category: wizard
+source: official
+conflicts: []
+requires: []
+targets: []
+arch: []
+min_flash_mb: 0
+min_ram_mb: 0
+enabled_by_default: true
+implicit: false
+status: ok

@@ -1,0 +1,13 @@
+name: proxy-passwall
+description: PassWall：Xray / sing-box 双核心，规则与分流成熟
+category: proxy
+source: official
+conflicts: []
+requires: []
+targets: []
+arch: []
+min_flash_mb: 0
+min_ram_mb: 0
+enabled_by_default: false
+implicit: false
+status: ok

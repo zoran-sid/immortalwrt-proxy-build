@@ -1,0 +1,17 @@
+-dnsmasq
+dnsmasq-full
+luci
+luci-ssl
+luci-i18n-base-zh-cn
+luci-theme-argon
+luci-app-argon-config
+luci-app-ttyd
+luci-app-attendedsysupgrade
+curl
+ca-bundle
+kmod-tun
+kmod-nft-tproxy
+kmod-nft-fullcone
+nftables-json
+conntrack
+tcpdump

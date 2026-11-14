@@ -4,14 +4,30 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "ImmortalWrt release (e.g. 25.12.2 or 24.10.6)"
+        description: "ImmortalWrt release (e.g. 25.12.2)"
         required: true
         default: "25.12.2"
-      proxy:
-        description: "Proxy profile"
+      target:
+        description: "Target device / platform"
         type: choice
-        options: [passwall, openclash, homeproxy, none]
-        default: passwall
+        options:
+          - x86-64
+          - x86-64-vm
+          - gl-mt2500
+          - gl-mt2500-airoha
+          - nanopi-r5s
+          - nanopi-r6s
+          - nanopi-r76s
+        default: x86-64
+      preset:
+        description: "Preset (custom uses the modules input)"
+        type: choice
+        options: [standard, full, lite, rescue, custom]
+        default: standard
+      modules:
+        description: "Only for preset=custom, comma separated (e.g. base,nat,proxy-homeproxy)"
+        required: false
+        default: ""
       release:
         description: "Publish a GitHub Release with the artifacts"
         type: boolean
@@ -23,7 +39,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-${{ github.ref }}-${{ inputs.proxy || 'matrix' }}
+  group: build-${{ github.ref }}-${{ inputs.target || 'matrix' }}-${{ inputs.preset || '' }}
   cancel-in-progress: false
 
 jobs:
@@ -33,57 +49,64 @@ jobs:
       matrix: ${{ steps.plan.outputs.matrix }}
       version: ${{ steps.plan.outputs.version }}
     steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install PyYAML
+        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends python3-yaml
       - id: plan
         env:
           EVENT: ${{ github.event_name }}
-          INPUT_PROXY: ${{ inputs.proxy }}
-          INPUT_VERSION: ${{ inputs.version }}
+          TARGET_IN: ${{ inputs.target }}
+          PRESET_IN: ${{ inputs.preset }}
+          MODULES_IN: ${{ inputs.modules }}
+          VERSION_IN: ${{ inputs.version }}
         run: |
+          set -euo pipefail
           if [ "$EVENT" = "push" ]; then
-            printf 'matrix=["passwall","openclash","none"]\n' >> "$GITHUB_OUTPUT"
-            printf 'version=%s\n' "${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+            matrix="$(python3 scripts/resolve.py matrix --event tag)"
+            version="${GITHUB_REF_NAME#v}"
           else
-            printf 'matrix=["%s"]\n' "$INPUT_PROXY" >> "$GITHUB_OUTPUT"
-            printf 'version=%s\n' "$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+            matrix="$(python3 scripts/resolve.py matrix --event dispatch \
+              --target "$TARGET_IN" --preset "$PRESET_IN" --modules "$MODULES_IN")"
+            version="$VERSION_IN"
           fi
-      - run: cat "$GITHUB_OUTPUT" || true
+          echo "matrix=$matrix"
+          printf 'matrix=%s\n' "$matrix" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "$version" >> "$GITHUB_OUTPUT"
 
   build:
     needs: plan
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     strategy:
       fail-fast: false
-      matrix:
-        proxy: ${{ fromJSON(needs.plan.outputs.matrix) }}
-    name: x86_64 / ${{ matrix.proxy }}
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    name: ${{ matrix.target }} / ${{ matrix.preset }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Runner resources
         run: |
-          set -x
           df -h /
           free -h
           nproc
-          uname -a
       - name: Install tools
-        run: sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends zstd qemu-utils genisoimage
-      - name: Build with ImageBuilder
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            zstd qemu-utils genisoimage python3-yaml
+      - name: Build
         env:
           VERSION: ${{ needs.plan.outputs.version }}
-          TARGET: x86/64
-          PROFILE: generic
-          PROXY_PROFILE: ${{ matrix.proxy }}
-          ROOTFS_PARTSIZE: "1024"
+          TARGET_NAME: ${{ matrix.target }}
+          PRESET: ${{ matrix.preset }}
+          MODULES: ${{ matrix.modules }}
         run: bash scripts/build.sh
       - name: Show results
         run: |
-          ls -lh dist/images
+          ls -lh dist/images | head -40
           cat dist/BUILDINFO-*.txt
-          cat dist/SHA256SUMS-*.txt
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: firmware-${{ needs.plan.outputs.version }}-x86_64-${{ matrix.proxy }}
+          name: firmware-${{ needs.plan.outputs.version }}-${{ matrix.target }}-${{ matrix.preset }}
           path: dist/**
           retention-days: 14
           if-no-files-found: error
@@ -100,7 +123,7 @@ jobs:
           path: artifacts
           merge-multiple: true
       - name: List assets
-        run: ls -lh artifacts
+        run: ls -lh artifacts | head -60
       - name: Publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -112,8 +135,8 @@ jobs:
             echo "release $TAG exists, uploading assets"
           else
             gh release create "$TAG" \
-              --title "ImmortalWrt $TAG (x86-64)" \
-              --notes "Automated ImageBuilder build (x86-64). Per-profile BUILDINFO and SHA256SUMS assets record provenance; images are not hardware-tested." \
+              --title "ImmortalWrt $TAG (multi-target)" \
+              --notes "ImageBuilder builds for x86-64, x86-64 VM and supported ARM64 devices. Per-target BUILDINFO and SHA256SUMS record provenance. None of these images is hardware-tested." \
               || gh release view "$TAG" >/dev/null
           fi
           find artifacts -type f -print0 | xargs -0 gh release upload "$TAG" --clobber

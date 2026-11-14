@@ -1,0 +1,14 @@
+name: proxy-openclash
+description: OpenClash：Clash 规则生态；构建时预置固定版本 mihomo 内核
+category: proxy
+source: official
+conflicts: []
+requires: []
+targets: []
+arch: []
+min_flash_mb: 0
+min_ram_mb: 0
+enabled_by_default: false
+implicit: false
+status: ok
+thirdparty_binary: mihomo-core

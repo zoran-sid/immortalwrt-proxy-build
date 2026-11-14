@@ -1,0 +1,13 @@
+name: nas
+description: Samba4 共享、磁盘管理、Alist/OpenList、硬盘休眠
+category: storage
+source: official
+conflicts: []
+requires: []
+targets: []
+arch: []
+min_flash_mb: 100
+min_ram_mb: 0
+enabled_by_default: false
+implicit: false
+status: ok

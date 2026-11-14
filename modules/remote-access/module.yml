@@ -1,0 +1,13 @@
+name: remote-access
+description: DDNS-GO、ACME 证书、Cloudflared 隧道
+category: remote
+source: official
+conflicts: []
+requires: []
+targets: []
+arch: []
+min_flash_mb: 0
+min_ram_mb: 0
+enabled_by_default: true
+implicit: false
+status: ok

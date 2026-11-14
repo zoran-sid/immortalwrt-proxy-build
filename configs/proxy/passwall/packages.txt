@@ -1,7 +1,0 @@
-# PassWall (xiaorouji) — resolved from the ImmortalWrt luci/packages feeds.
-# Dependencies (chinadns-ng, ipt2socks, xray-core, sing-box, kmod-nft-tproxy...)
-# are pulled in automatically by the package manager.
-luci-app-passwall
-luci-i18n-passwall-zh-cn
-xray-core
-sing-box

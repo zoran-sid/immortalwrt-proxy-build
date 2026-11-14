@@ -1,0 +1,15 @@
+name: vpn-easytier
+description: EasyTier 组网（第三方）。当前只有 ipk(22.03.7) 与 SNAPSHOT 版 apk，没有与 25.12.2 ABI 匹配的资产，暂不可用
+category: vpn
+source: thirdparty
+conflicts: []
+requires: []
+targets: []
+arch: []
+min_flash_mb: 0
+min_ram_mb: 0
+enabled_by_default: false
+implicit: false
+status: blocked
+thirdparty: easytier
+blocked_reason: no 25.12 ABI-compatible EasyTier apk in upstream releases

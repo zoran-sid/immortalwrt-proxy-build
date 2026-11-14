@@ -1,0 +1,13 @@
+name: docker
+description: Docker + Dockerman 管理界面（需要在向导里把数据目录指到大分区）
+category: container
+source: official
+conflicts: []
+requires: []
+targets: []
+arch: []
+min_flash_mb: 600
+min_ram_mb: 0
+enabled_by_default: false
+implicit: false
+status: ok

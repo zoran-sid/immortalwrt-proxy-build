@@ -1,0 +1,14 @@
+name: brume3
+kind: arm
+arch: aarch64_cortex-a53
+target: mediatek
+subtarget: filogic
+profile: glinet_gl-mt5000
+rootfs_partsize: 1024
+flash_mb: 8192
+ram_mb: 1024
+status: pending-upstream
+note: >-
+  GL-MT5000 (Brume 3, MT7987A + RTL8366ub) 尚未进入 25.12.2 与 snapshot 的
+  mediatek/filogic profile 列表，交换芯片驱动仍在上游。上游出现
+  glinet_gl-mt5000 profile 后，把 status 改成 ready 并重跑即可。

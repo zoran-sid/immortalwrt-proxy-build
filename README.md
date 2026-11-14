@@ -1,141 +1,177 @@
-# ImmortalWrt proxy firmware builder (x86-64)
+# ImmortalWrt 多目标固件（x86 / ARM64 / 虚拟机）
 
-用 ImmortalWrt 官方 **ImageBuilder** 在 GitHub Actions 上构建带科学上网插件的固件。
-不编译源码，单次构建约 5–10 分钟，产物带 manifest、SHA256 和构建溯源信息。
+用 ImmortalWrt 官方 **ImageBuilder** 在 GitHub Actions 上构建固件。镜像按「模块 + 预设」组装：
+同一个仓库既能出 x86 物理机、x86 虚拟机，也能出 GL.iNet Brume 2、NanoPi R5S/R6S/R76S 的固件。
 
-> 这是"下载 + 组装"而不是"从源码编译"。需要改内核选项、裁剪 busybox、
-> 打补丁时才需要换成源码编译（见文末）。
+不编译源码，单次构建 10 分钟左右，产物带 manifest、SHA256 和构建溯源。
 
-## 支持范围（当前）
+## 设备支持矩阵
 
-| 项目 | 状态 |
-|---|---|
-| 目标平台 | x86/64（`generic` profile，UEFI + Legacy BIOS） |
-| ImmortalWrt 版本 | 25.12.2（默认，apk 包管理）／24.10.6（opkg，按需） |
-| 代理 profile | `passwall`、`openclash`、`homeproxy`、`none` |
-| ARM64 实体路由 | **未实现**，需要先确定具体设备型号 |
-| 真机 / 真实网络测试 | **未做**（CI 只保证构建成功） |
+| 目标 | 架构 | target / subtarget | profile | 可用预设 | 状态 |
+|---|---|---|---|---|---|
+| x86-64 | x86_64 | x86/64 | generic | standard / full / rescue | ✅ 支持 |
+| x86-64-vm | x86_64 | x86/64 | generic | standard | ✅ 支持（PVE / ESXi / Hyper-V） |
+| GL-MT2500（MaxLinear PHY） | aarch64_cortex-a53 | mediatek/filogic | glinet_gl-mt2500 | lite / rescue | ✅ 支持 |
+| GL-MT2500（Airoha PHY） | aarch64_cortex-a53 | mediatek/filogic | glinet_gl-mt2500-airoha | lite / rescue | ✅ 支持 |
+| NanoPi R5S | aarch64_generic | rockchip/armv8 | friendlyarm_nanopi-r5s | lite / rescue | ✅ 支持 |
+| NanoPi R6S | aarch64_generic | rockchip/armv8 | friendlyarm_nanopi-r6s | standard / full / rescue | ✅ 支持 |
+| NanoPi R76S | aarch64_generic | rockchip/armv8 | friendlyarm_nanopi-r76s | standard / full / rescue | ✅ 支持 |
+| GL-MT5000（Brume 3） | aarch64_cortex-a53 | mediatek/filogic | 未提供 | — | ⏳ 等待上游 |
 
-## 代理 profile 说明
+**关于 Brume 3**：MT7987A + RTL8366ub 的交换芯片驱动仍在上游，25.12.2 与 snapshot 的
+`mediatek/filogic` profile 列表里都没有 `glinet_gl-mt5000`。仓库里已有
+`targets/brume3.yml`（`status: pending-upstream`），上游出现该 profile 后把 status 改成
+`ready` 即可参与构建，不需要改代码。
 
-| profile | 内容 | 说明 |
-|---|---|---|
-| `passwall` | luci-app-passwall + xray-core + sing-box | 默认；规则与 DNS 逻辑为国内用户常见配置 |
-| `openclash` | luci-app-openclash | 适合需要完整 Clash 规则/订阅生态；官方发布页明确不建议同时开 IPv6 |
-| `homeproxy` | luci-app-homeproxy + sing-box | ImmortalWrt 原生前端，TProxy/TUN 走 fw4+nftables |
-| `none` | 无代理 | 基线镜像，用于对照和救援 |
+没有「通用 ARM64 镜像」：每个设备的 profile 都是独立的，刷错设备会变砖。
 
-三个插件都直接来自 ImmortalWrt 官方 feed（`releases/<ver>/packages/x86_64/luci`），
-不引入第三方 ipk，因此不会出现内核 ABI 不匹配导致的装不上。
+## 预设
 
-## 用法
+| 预设 | 适用 | 模块 | 默认代理 | rootfs |
+|---|---|---|---|---|
+| `standard` | 所有目标 | base, nat, 三个代理前端 + guard, frp, nps, monitor-lite, AdGuardHome, vpn-mesh, remote-access, qos, notify, wizard | x86: PassWall / ARM: HomeProxy | 1024 MiB |
+| `full` | x86-64、x86-64-vm、R6S、R76S | standard + monitor-pro, nas, docker | 同上 | 2048 MiB |
+| `lite` | MT2500、MT2500-airoha、R5S | base, nat, HomeProxy + Nikki + guard, frp, monitor-lite, vpn-mesh, wizard | HomeProxy | 1024 MiB |
+| `rescue` | 所有目标 | base（无任何代理前端） | 无 | 1024 MiB |
+
+`tag` 发版矩阵共 14 个构建：x86-64 × {standard, full, rescue}、x86-64-vm × {standard}、
+5 个 ARM 设备 × {lite 或 standard, rescue}。
+
+## 模块
+
+| 分类 | 模块 | 内容 | standard 默认 |
+|---|---|---|---|
+| base | `base` | LuCI + 中文 + Argon、dnsmasq-full、nftables、TProxy/FullCone kmod、ttyd、attendedsysupgrade | 必选 |
+| base | `x86-nics` | RTL8125 / RTL8126 / Intel I225 驱动（仅 x86，自动附加） | 自动 |
+| nat | `nat` | UPnP（nftables）、NATMap | ✔ |
+| proxy | `proxy-passwall` | PassWall + Xray + sing-box | ✔ |
+| proxy | `proxy-homeproxy` | HomeProxy + sing-box | ✔ |
+| proxy | `proxy-nikki` | Nikki + Mihomo（第三方，锁 v1.26.2） | ✔ |
+| proxy | `proxy-openclash` | OpenClash，构建时预置 mihomo 内核 | 可选 |
+| proxy | `proxy-guard` | 代理互斥 + `proxy-switch` + fail-open 看门狗 | 自动 |
+| tunnel | `frp` / `frps` | frpc / frps | ✔ / 可选 |
+| tunnel | `nps` | npc / nps（上游维护停滞，建议优先 FRP） | ✔ |
+| monitor | `monitor-lite` | nlbwmon、vnstat2、collectd 基础指标 | ✔ |
+| monitor | `monitor-pro` | netdata、Prometheus node exporter | full |
+| dns | `dns-adguardhome` | AdGuardHome（预装不接管 53，向导里启用） | ✔ |
+| dns | `dns-smartdns` / `dns-mosdns` | SmartDNS / mosdns 核心（互斥，mosdns 无 LuCI） | 可选 |
+| vpn | `vpn-mesh` | Tailscale、ZeroTier、WireGuard | ✔ |
+| vpn | `vpn-easytier` | EasyTier（**blocked**：上游无 25.12 ABI 资产） | — |
+| remote | `remote-access` | DDNS-GO、ACME、Cloudflared | ✔ |
+| qos | `qos` | SQM、应用过滤/家长控制 | ✔ |
+| storage | `nas` | Samba4、diskman、OpenList、hd-idle | full |
+| container | `docker` | Docker + Dockerman | full |
+| notify | `notify` | 微信推送（掉线/上下线） | ✔ |
+| vm | `vm-guest` | qemu-guest-agent、open-vm-tools（仅 VM 目标，自动附加） | 自动 |
+| wizard | `wizard` | 首次登录向导（纯 LuCI JS + shell） | ✔ |
+
+三个代理前端可以同时**安装**，但同一时刻只允许一个**启用**：`proxy-guard` 在首启和
+`proxy-switch` 切换时停用其余前端并清理残留 nftables 表。`proxy-openclash` 保留为可选，
+不进入任何预设。
+
+## 快速开始
 
 ### 网页触发
 
-Actions → `build-firmware` → Run workflow，选择版本、代理 profile；
-勾选 `release` 会把产物发布成 Release。
+Actions → `build-firmware` → Run workflow：
 
-### 命令行触发
+- `target`：设备
+- `preset`：套餐；选 `custom` 时用 `modules` 填逗号分隔的模块名
+- `release`：是否发布到 Release
 
-```bash
-gh workflow run build-firmware -f version=25.12.2 -f proxy=passwall -f release=true
-gh run list --workflow=build-firmware --limit 3
-gh run watch <run-id>
-```
-
-### 打 tag 自动发版
+### 命令行
 
 ```bash
+# 单个目标
+gh workflow run build-firmware -f target=gl-mt2500 -f preset=lite
+
+# 自定义模块组合（文件名会带模块列表的短 hash）
+gh workflow run build-firmware -f target=x86-64 -f preset=custom \
+  -f modules=base,nat,proxy-homeproxy,wizard
+
+# 正式发版：14 个目标/预设组合全出
 git tag v25.12.2 && git push origin v25.12.2
 ```
-
-会依次构建 `passwall`、`openclash`、`none` 三个 profile 并发布到同名 Release。
 
 ### 本地构建（Linux）
 
 ```bash
-VERSION=25.12.2 PROXY_PROFILE=passwall bash scripts/build.sh
-# 产物在 dist/images/、dist/SHA256SUMS-<ver>-x86_64-<profile>.txt、dist/BUILDINFO-<ver>-x86_64-<profile>.txt
+sudo apt-get install -y zstd qemu-utils genisoimage python3-yaml
+TARGET_NAME=x86-64 PRESET=standard bash scripts/build.sh
 ```
 
-macOS 不能直接跑：ImageBuilder 是 Linux x86_64 二进制。本机需要 Linux 或容器。
+macOS 上跑不了：ImageBuilder 是 Linux x86_64 二进制，且本地没有 Docker 时没有替代路径。
 
 ## 产物
 
 ```
-dist/images/immortalwrt-25.12.2-x86_64-passwall-squashfs-combined-efi.img.gz
-dist/images/immortalwrt-25.12.2-x86_64-passwall-squashfs-combined.img.gz
-dist/images/immortalwrt-25.12.2-x86_64-passwall-ext4-combined-efi.img.gz
-dist/images/immortalwrt-25.12.2-x86_64-passwall-*.qcow2 / *.vmdk / *.vdi
-dist/images/immortalwrt-25.12.2-x86_64-passwall.manifest
-dist/SHA256SUMS-25.12.2-x86_64-passwall.txt
-dist/BUILDINFO-25.12.2-x86_64-passwall.txt   # 版本、包列表、IB 校验和、commit、run id
+dist/images/immortalwrt-25.12.2-x86-64-standard-squashfs-combined-efi.img.gz
+dist/images/immortalwrt-25.12.2-gl-mt2500-lite-squashfs-sysupgrade.img.gz
+dist/images/immortalwrt-25.12.2-x86-64-vm-standard-squashfs-combined-efi.qcow2
+dist/images/immortalwrt-<ver>-<target>-<preset>.manifest
+dist/SHA256SUMS-<ver>-<target>-<preset>.txt
+dist/BUILDINFO-<ver>-<target>-<preset>.txt   # 模块列表、包、IB 校验和、第三方 sha、run id
 ```
 
-写盘：
+命名规则：`immortalwrt-<ver>-<target>-<preset>-<格式>`。custom 构建的 `<preset>` 是
+`custom-<8 位 hash>`，BUILDINFO 里保留完整模块列表。
 
-```bash
-gunzip -c immortalwrt-*.img.gz | sudo dd of=/dev/sdX bs=4M status=progress conv=fsync
+## 首次登录向导
+
+首次登录后进入 **系统 → 初始化向导**（`admin/system/wizard`），四步：
+
+1. **场景**：主路由 PPPoE / 主路由 DHCP / 旁路由 / 旅行网关
+2. **参数**：LAN 地址、掩码、旁路由网关、DNS、管理密码（≥ 8 位）
+3. **代理**：选前端 + 订阅地址（只写本机 UCI，不上传）+ 可选 AdGuardHome / FullCone / Tailscale / DDNS
+4. **确认**：应用后 90 秒内确认，超时自动回滚
+
+向导的重型逻辑在 shell 里，SSH 下可以直接用同一套：
+
+```sh
+/usr/libexec/wizard/apply.sh scenario=bypass lan_ip=192.168.1.2 \
+  lan_mask=255.255.255.0 gateway=192.168.1.1 proxy=homeproxy root_pass='********'
+/usr/libexec/wizard/confirm.sh      # 90 秒内确认
 ```
 
-## 首次登录后必做
+> 截图待补（向导 UI 尚未在真机上验证，见「构建状态与未验证项」）。
 
-1. 改 LAN IP、关闭/保留 DHCP（旁路由模式务必关 DHCP，或只做 DHCP 但网关指向本机）。
-2. 插件的 DNS 只保留一条链路，不要 dnsmasq + SmartDNS + AdGuardHome 叠加。
-3. 代理插件里先只填一个节点验证连通，再导入订阅。
-4. 出问题先跑 `scripts/diagnostics/network-doctor.sh`，它只读、会自动脱敏。
+## 第三方来源与许可证
 
-## 排障
+只允许 `thirdparty/lock.yml` 白名单内的第三方资产，构建时逐个校验 sha256，不匹配直接失败。
 
-```bash
-sh /root/network-doctor.sh            # 全量报告 + 故障分类
-sh /root/network-doctor.sh --redact-node-ip
-```
+| 资产 | 版本 | 许可证 | 用途 |
+|---|---|---|---|
+| [OpenWrt-nikki](https://github.com/nikkinikki-org/OpenWrt-nikki) | v1.26.2 | GPL-2.0 | Nikki + Mihomo apk 仓库 |
+| [mihomo](https://github.com/MetaCubeX/mihomo) | v1.19.34 | GPL-3.0 | OpenClash 预置内核 |
 
-输出会给出类似 `DNS_LOCAL_FAILURE`、`FIREWALL_RULE_MISSING`、`IPV6_PROXY_BYPASS`
-的分类，而不是一句"网络异常"。详见 [docs/troubleshooting.md](docs/troubleshooting.md)。
+**未纳入**：EasyTier 上游只提供 ipk（22.03.7）与 SNAPSHOT apk，没有与 25.12.2 ABI 匹配的
+资产，`modules/vpn-easytier` 标记为 `blocked`。Nikki 的 ARM 资产只覆盖
+`aarch64_cortex-a53` 与 `aarch64_generic`，其它架构会在解析阶段直接报错。
 
-## 交接
+新增第三方包请改 `thirdparty/lock.yml`，并在 `AGENTS.md` 的流程内操作。
 
-后续由其他 agent 接手时先读 [AGENTS.md](AGENTS.md)：里面有已验证/未验证的界限、
-已经踩过的坑、不变量和下一步的验收标准。Claude Code 通过 `CLAUDE.md` 自动加载同一份内容。
+## 构建状态与未验证项
+
+- 本文档不预先声明构建成功；以 Actions 的实际结果为准。
+- **未真机验证**：向导 UI、`proxy-guard` 的 fail-open 行为、Nikki 在 ARM 上的运行、
+  三种场景（主路由/旁路由/旅行）的实际连通性。
+- **未做**：QEMU 冒烟、IPv6 透明代理测试、24–72h soak。
+- `x86-nics` 的驱动包只保证在 feed 中存在，未在真实网卡上验证。
 
 ## 仓库结构
 
 ```
-targets/x86_64.yml              # 目标描述（target/profile/镜像格式/测试状态）
-configs/common/packages.txt     # 所有 profile 共用的包
-configs/proxy/<profile>/        # 每个代理 profile 的包清单（可选 files/ 覆盖层）
-scripts/build.sh                # 下载 IB → 校验 → make image → 收集产物
-scripts/diagnostics/            # 只读诊断
-.github/workflows/build.yml     # 构建 + 发布
-.github/workflows/validate.yml  # shellcheck / YAML / 包清单检查
+targets/<name>.yml     设备/平台描述（arch, target, subtarget, profile, rootfs, 状态）
+modules/<name>/        module.yml + packages.txt + 可选 files/（FILES 覆盖层）
+presets/<name>.yml     模块列表 + 适用目标 + 默认代理
+thirdparty/lock.yml    第三方资产白名单（url + sha256 + 许可证 + 选择理由）
+scripts/resolve.py     模块解析：冲突/依赖/目标兼容/体积预算/files 合并
+scripts/thirdparty.py  下载 → sha256 校验 → 解包 → 写本地 apk 仓库
+scripts/build.sh       解析 → 下载 IB → 组装 → make image → 产物与元数据
+tests/test_resolve.py  解析器单测（冲突、目标限制、hash 稳定性、矩阵）
 ```
 
-## 本次验证记录（2026-11-13）
+## 面向公众
 
-| 项 | 结果 |
-|---|---|
-| 上游版本核实 | 25.12.2 为 current stable（2026-09-06 发布），24.10.6 为 old stable（2026-04-26） |
-| 包管理器 | 25.12 用 apk（`.apk` / `index.json`），24.10 用 opkg |
-| 构建 | passwall / openclash / homeproxy 三个 profile 全部成功 |
-| 产物 | 12 个镜像格式/profile（img.gz、qcow2、vdi、vmdk、vhdx、iso） |
-| 校验 | `sha256sum -c` 对已下载镜像验证通过 |
-| manifest | 从构建 rootfs 的 apk 数据库生成，passwall profile 共 309 个包 |
-| 未验证 | 启动、联网、IPv6、真机、24–72h 稳定性 |
-
-Feed 里锁定的插件版本是 `luci-app-passwall 26.10.29-r1`、`luci-app-openclash 0.48.002`、
-`luci-app-homeproxy 26.298.29275`、`xray-core 26.10.21-r1`、`sing-box 1.12.25-r1`。
-上游项目最新 tag 可能比这更新，但 25.12.2 这个 release 只保证这一组可用。
-
-## 未完成 / 已知限制
-
-- **没有真机测试**：CI 只证明镜像能构建出来，不证明能启动、能上网。
-- **没有 QEMU 冒烟测试**：需要自托管 runner 或本地 KVM，当前工作流不覆盖。
-- **没有 IPv6 专项验证**：插件镜像保留 IPv6 栈，但透明代理的 v6 路径未验证。
-- **ARM64 未支持**：不同设备 `target/subtarget/profile` 不同，不能做"通用 ARM64 镜像"。
-- **24.10.6 兼容性未在 CI 验证**：`VERSION=24.10.6` 走 opkg 路径，代码兼容但未跑过。
-
-改成源码编译（需要自定义内核/补丁）时，替换 `scripts/build.sh` 为
-`git clone immortalwrt` + `feeds update/install` + `make menuconfig` 的流程，
-GitHub 上单次约 1–3 小时，14GB 磁盘是硬约束，需要先清理 runner 的预装 SDK。
+仓库当前是 **private**。要惠及他人需要改 public —— 这一步由仓库主人决定，本文档只做说明：
+镜像不含任何订阅、节点或凭据；第三方资产只记录来源 URL 与 sha256，可审计。

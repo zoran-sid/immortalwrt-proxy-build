@@ -1,0 +1,13 @@
+name: vpn-mesh
+description: Tailscale / ZeroTier 组网 + WireGuard 协议支持
+category: vpn
+source: official
+conflicts: []
+requires: []
+targets: []
+arch: []
+min_flash_mb: 0
+min_ram_mb: 0
+enabled_by_default: true
+implicit: false
+status: ok

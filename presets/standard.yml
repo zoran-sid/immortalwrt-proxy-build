@@ -1,0 +1,23 @@
+name: standard
+description: 推荐套餐：三种代理前端共存、基础监控、AdGuardHome、组网、远程接入、QoS、通知、首启向导
+targets: [all]
+proxy_default:
+  arm: homeproxy
+  baremetal: passwall
+  vm: passwall
+modules:
+  - base
+  - nat
+  - proxy-passwall
+  - proxy-homeproxy
+  - proxy-nikki
+  - proxy-guard
+  - frp
+  - nps
+  - monitor-lite
+  - dns-adguardhome
+  - vpn-mesh
+  - remote-access
+  - qos
+  - notify
+  - wizard

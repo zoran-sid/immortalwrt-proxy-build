@@ -1,185 +1,189 @@
 # AGENTS.md — 交接说明
 
-给后续接手的 agent（Codex / Claude Code / 其他）。读完这一份就应该能继续干活，
-不需要重新探索仓库、不需要重新踩一遍已经踩过的坑。
+给后续接手的 agent（Codex / Claude Code / 其他）。读完这份就能继续干活，
+不需要重新探索仓库，也不要重新踩已经踩过的坑。
 
-最后更新：2026-11-13，对应 commit `1a704da`。
+最后更新：2026-11-14。这一版是「模块 + 预设 + 多目标」重构后的状态。
 
 ---
 
 ## 1. 这是什么
 
-用 ImmortalWrt 官方 **ImageBuilder** 在 GitHub Actions 上产出 x86-64 固件的仓库，
-镜像内集成一个科学上网前端（PassWall / OpenClash / HomeProxy，三选一）。
+用 ImmortalWrt 官方 **ImageBuilder** 产出多目标固件：x86-64、x86-64 虚拟机，
+以及 5 个受支持的 ARM64 设备。镜像内容由「模块 + 预设」组合决定，不编译源码。
 
-**不是**源码编译。不要把它改成 `make menuconfig` 的流程，除非用户明确要求自定义内核。
-
-- 仓库：`zoran-sid/immortalwrt-proxy-build`（**private**）
+- 仓库：`zoran-sid/immortalwrt-proxy-build`（**private**，改可见性由仓库主人决定）
 - 默认分支：`main`
-- 发布：Release tag `25.12.2`，已含 51 个资产（3 个 profile × 12 镜像 + 元数据）
+- 上游基线：ImmortalWrt **25.12.2**（apk 包管理）
+
+**不要**改成 `make menuconfig` 源码编译流程，除非用户明确要求自定义内核。
 
 ## 2. 当前状态（先看这个）
 
-| 项 | 状态 | 证据 |
-|---|---|---|
-| 三个 profile 构建 | ✅ 全绿 | runs `43442349059`(passwall) / `43442356505`(openclash) / `43442364453`(homeproxy) |
-| 校验和 | ✅ | 下载镜像后 `sha256sum -c` 通过 |
-| package manifest | ✅ | passwall 309 包，由构建 rootfs 的 apk 数据库生成 |
-| validate 工作流 | ✅ | shellcheck / YAML / 包清单检查 |
-| 启动 / 联网 / 真机 | ❌ **从未验证** | 不要声称"可用" |
-| IPv6 透明代理 | ❌ 未验证 | 镜像保留 v6 栈，路径没测 |
-| ARM64 | ❌ 未实现 | 缺设备型号，不能做"通用 ARM64" |
-| 24.10.6（opkg）路径 | ⚠️ 代码兼容但没跑过 | 只有 25.12.2 被实际验证 |
+| 项 | 状态 |
+|---|---|
+| 结构重构（targets/modules/presets/resolve/build/workflows） | ✅ 已完成 |
+| 解析器单测（13 项：冲突/目标限制/requires/hash/矩阵） | ✅ 本地通过 |
+| 包名核实（x86_64 / aarch64_cortex-a53 / aarch64_generic） | ✅ 逐包核对过 feed |
+| 重构后首次 CI 构建 | ⏳ 本轮只触发 1 次，结果看 Actions |
+| 已有 25.12.2 旧结构产物（passwall/openclash/homeproxy） | ✅ Release `25.12.2` 里仍可下载 |
+| 向导 UI / proxy-guard / Nikki on ARM | ❌ **未真机验证** |
+| QEMU 冒烟 / IPv6 / soak | ❌ 未做 |
+| Brume 3（GL-MT5000） | ⏳ 上游未提供 profile，仅预留 `targets/brume3.yml` |
+
+不要声称任何镜像「可用」；只能声称「构建通过 / 未构建」。
 
 ## 3. 常用命令
 
 ```bash
-# 触发构建（单 profile）
-gh workflow run build-firmware -f version=25.12.2 -f proxy=passwall -f release=true
+# 单目标
+gh workflow run build-firmware -f target=x86-64 -f preset=standard
+
+# 自定义模块（preset=custom 时 modules 才生效）
+gh workflow run build-firmware -f target=gl-mt2500 -f preset=custom \
+  -f modules=base,nat,proxy-homeproxy,proxy-guard,wizard
 
 # 观察
-gh run list --workflow=build-firmware --limit 5
+gh run list --workflow=build-firmware --limit 10
 gh run watch <run-id>
-gh run view <run-id> --json status,conclusion,jobs --jq '.jobs[]|"\(.name): \(.conclusion)"'
-
-# 失败的日志（注意 sandbox：gh 默认写 ~/.cache，被拦时用这个）
 XDG_CACHE_HOME=/tmp/ghcache gh run view <run-id> --log-failed
 
-# 打 tag 走全量发版（passwall + openclash + none）
+# 全矩阵发版（14 个构建）
 git tag v25.12.2 && git push origin v25.12.2
 
-# 本地构建（必须 Linux；macOS 跑不了 Linux 版 ImageBuilder）
-VERSION=25.12.2 PROXY_PROFILE=passwall bash scripts/build.sh
+# 本地解析/校验（不需要构建）
+python3 scripts/resolve.py check --target x86-64 --preset standard
+python3 scripts/resolve.py matrix --event tag | python3 -m json.tool
+python3 tests/test_resolve.py -v
+
+# 本地构建（Linux；需要 zstd qemu-utils genisoimage python3-yaml）
+TARGET_NAME=gl-mt2500 PRESET=lite bash scripts/build.sh
 ```
 
-本地跑之前需要：`sudo apt-get install -y zstd qemu-utils genisoimage`。
-本机无 Docker daemon 时不要试图在 macOS 上跑，直接走 Actions。
+macOS 不能构建（ImageBuilder 是 Linux 二进制）。本机无 Docker daemon 时不要尝试本地绕路。
 
 ## 4. 结构
 
 ```
-targets/x86_64.yml              目标描述（target/profile/测试状态），目前只是文档，未被执行逻辑读取
-configs/common/packages.txt     所有 profile 共用；以 '-' 开头的行表示移除默认包
-configs/proxy/<p>/packages.txt  每个 profile 的增量包
-configs/proxy/<p>/files/        可选，作为 ImageBuilder 的 FILES 覆盖层（目前都不存在）
-scripts/build.sh                下载 IB → 校验 → make image → 收集镜像 → 生成元数据
-scripts/diagnostics/network-doctor.sh   在设备上跑的只读诊断，自动脱敏
-.github/workflows/build.yml     plan → build(matrix) → release
-.github/workflows/validate.yml  shellcheck / YAML / 包清单 / 上游可达性
+targets/<name>.yml      真被 build.sh 读取：arch/target/subtarget/profile/rootfs_partsize/status/kind
+modules/<name>/         module.yml + packages.txt + 可选 files/（合并成 ImageBuilder 的 FILES）
+presets/<name>.yml      modules + targets + proxy_default（可按 target kind 分别指定）
+thirdparty/lock.yml     白名单：url + sha256 + 许可证 + 选择理由（repo 或 binary 两类）
+scripts/resolve.py      解析器，唯一真相：冲突/requires/目标兼容/预算/files 合并/矩阵
+scripts/thirdparty.py   下载 → sha256 校验 → 解包成 apk 本地仓库，或写二进制到覆盖层
+scripts/build.sh        编排：resolve → IB → 第三方 → make image → 产物与元数据
+tests/test_resolve.py   解析器单测
 ```
 
-`build.sh` 的输入全部是环境变量：`VERSION`、`TARGET`、`PROFILE`、`PROXY_PROFILE`、
-`ROOTFS_PARTSIZE`、`MIRROR`。输出固定在 `dist/`：
+产物命名：`immortalwrt-<ver>-<target>-<preset>-<格式>`，元数据
+`BUILDINFO-<ver>-<target>-<preset>.txt` / `SHA256SUMS-<ver>-<target>-<preset>.txt`。
+custom 构建的 preset 是 `custom-<sha256(排序模块列表)[:8]>`。
 
-```
-dist/images/immortalwrt-<ver>-x86_64-<profile>-<fmt>
-dist/SHA256SUMS-<ver>-x86_64-<profile>.txt
-dist/BUILDINFO-<ver>-x86_64-<profile>.txt
-```
+## 5. 解析规则（改模块前必须知道）
 
-## 5. 已核实的上游事实（2026-11-13）
+- `conflicts`：双向检查，冲突直接报错（如三个 DNS 模块互斥）。
+- `requires`：传递闭包，依赖排在前面（`monitor-pro` 依赖 `monitor-lite`）。
+- `targets` / `arch`：空数组 = 全部；非空则严格限制，不满足就报错，**不静默跳过**。
+- `implicit: true`：不进预设，按 arch/target 自动附加（`x86-nics`、`vm-guest`）。
+- `proxy-guard`：只要选了任一 `proxy-*`，解析器自动补上（防止互斥失效）。
+- `status: blocked`：报错并给出原因（`vpn-easytier`）。
+- 体积预算：`sum(min_flash_mb) ≤ rootfs_partsize - 128`。
+- files 合并：多个模块的 `files/` 按模块顺序合并；同一路径内容不同 → 报错，
+  内容相同 → 去重。可执行位统一成 755，其余 644。
 
-- `25.12.2` = current stable（2026-09-06）；`24.10.6` = old stable（2026-04-26）
-- 25.12 系列使用 **apk**（`.apk` / `index.json`），24.10 使用 opkg
-- x86-64 内核 `6.12.103`
-- ImageBuilder 的 sha256：`b9b290f5ef60a22bccd5bdca9c1e7523b8fc84e60462afbf550e20db94acf2c6`
-- 官方 feed 内的版本：`luci-app-passwall 26.10.29-r1`、`luci-app-openclash 0.48.002`、
-  `luci-app-homeproxy 26.298.29275`、`xray-core 26.10.21-r1`、`sing-box 1.12.25-r1`
-- 第三方项目的最新 tag 可能更新，但本仓库只使用该 release 自带 feed，**不要**混入第三方 ipk
+## 6. 已核实的上游事实（2026-11-14，别重复调研）
 
-## 6. 已经踩过的坑（别重犯）
+- 25.12.2 = current stable（2026-09-06）；24.10.6 = old stable；25.12 起用 apk。
+- 内核 6.12.103；x86 kmods 仓库含 `kmod-tun`、`kmod-nft-tproxy`、`kmod-nft-fullcone`、
+  `kmod-r8125/r8126/igc`；两个 ARM 目标同样有前四个（无 x86 网卡驱动）。
+- `block-mount` 不在通用 feed，在 **target 专属** packages feed 里。
+- 没有 `nftables` 包（是 `nftables-json`）；没有 `acme`（是 `acme-acmesh`）；
+  没有 `luci-app-mosdns`（只有 `mosdns` 核心）。
+- ARM profile 名：`glinet_gl-mt2500`、`glinet_gl-mt2500-airoha`、`friendlyarm_nanopi-r5s/r6s/r76s`。
+- 第三方：Nikki v1.26.2 提供 25.12 apk 仓库（三种 arch）；mihomo v1.19.34 有 amd64/arm64 二进制；
+  EasyTier 没有 25.12 ABI 资产（blocked）。
 
-1. **checksum 格式**：下载站的 `sha256sums` 是 `<hash> *<file>`（二进制标记 `*`），
-   `grep " file"` 匹配不到。现在用 awk 匹配 `$2 == n || $2 == "*" n`。
-2. **dnsmasq 冲突**：默认包含 `dnsmasq`，要装 `dnsmasq-full` 必须在清单里先写 `-dnsmasq`。
-   ImageBuilder 的 `-pkg` 语义在 Makefile 里是过滤 BUILD_PACKAGES，apk/opkg 都支持。
-3. **包名**：没有 `nftables` 这个包，实际是 `nftables-json` / `nftables-nojson`。
-4. **宿主工具**：`qemu-img`（qcow2/vdi/vmdk/vhdx）和 `mkisofs`（ISO）不在 IB 里，
-   CI 必须装 `qemu-utils genisoimage`；`mkfs.fat`、`mcopy`、`mkfs.ext4`、grub 工具是 IB 自带的。
-5. **release job 没有 git 上下文**：`gh release` 会 `fatal: not a git repository`，
-   必须传 `GH_REPO: ${{ github.repository }}`。
-6. **多 profile 合并**：三个 artifact 合并到同一目录时，`BUILDINFO` / `SHA256SUMS`
-   同名会互相覆盖。现在文件名带 profile 后缀，不要改回去。
-7. **上传目录**：`gh release upload artifacts/*` 会把 `images/` 目录当资产，失败。
-   现在用 `find -type f -print0 | xargs -0 gh release upload`。
-8. **manifest**：`make image` 不产出 manifest。现在从
-   `build_dir/target-*/root-*/lib/apk/db/installed`（或 opkg 的 `usr/lib/opkg/status`）生成，
-   这比再跑一次 `make manifest`（会重建 rootfs）便宜得多。
+## 7. 踩过的坑（别重犯）
 
-## 7. 改动指南
+1. `sha256sums` 是 `<sha> *<file>`，用 awk 匹配 `$2 == n || $2 == "*" n`。
+2. 装 `dnsmasq-full` 前必须先 `-dnsmasq`。
+3. `qemu-img`（qcow2/vdi/vmdk/vhdx）和 `mkisofs`（ISO）不在 IB 内，CI 要装
+   `qemu-utils genisoimage`。
+4. release job 没有 git 上下文，必须传 `GH_REPO`。
+5. 多目标合并 artifact 时元数据文件名必须带 target/preset，否则互相覆盖。
+6. `gh release upload artifacts/*` 会把目录当资产，用 `find -type f -print0 | xargs -0`。
+7. `make image` 不产出 manifest，从 `build_dir/target-*/root-*/lib/apk/db/installed`
+   （或 opkg 的 `usr/lib/opkg/status`）生成。
+8. **新增**：解析器读 YAML，build job 必须装 `python3-yaml`（plan job 也要）。
+9. **新增**：GitHub matrix 需要 `{"include": [...]}` 结构，`fromJSON` 直接吃。
+10. **新增**：`python3 scripts/resolve.py matrix` 里不要复用循环变量名（曾把 target 名
+    覆盖成 `full`，导致矩阵错乱）。已有单测覆盖。
+11. **新增**：第三方 apk 仓库是往 IB 的 `repositories` 文件追加**绝对路径**的
+    `packages.adb`（IB 自己就用 `--repository <path>/packages.adb`，所以 apk 接受裸路径）。
+12. **新增**：`build.sh` 里 `cd "$IB_DIR"` 之后不能用相对路径读 `$WORKDIR` 的文件，
+    IB 校验和要提前存进变量。
+13. **新增**：`custom-<hash>` 预设必须能被再次解析（resolve 把 `custom-*` 当 custom 处理）。
 
-**加一个包**：改 `configs/*/packages.txt`，一行一个，`#` 注释，`-foo` 表示移除。
-先确认包在该 release 的 feed 里存在（`releases/<ver>/packages/x86_64/<feed>/index.json`
-对 apk，或 `Packages.gz` 对 opkg）。
+## 8. 改动指南
 
-**加一个代理 profile**：`mkdir configs/proxy/<name>` + `packages.txt`，
-再把它加进 `build.yml` 的 `plan` job（tag 触发的矩阵）和 `workflow_dispatch` 的 `options`。
-注意：同一镜像里只放一个透明代理前端，不要把 passwall 和 openclash 塞一起。
+**加模块**：新建 `modules/<name>/{module.yml,packages.txt}`，包名先在对应 release 的
+feed 里确认（apk 看 `packages/<arch>/<feed>/index.json`，kmod 看
+`targets/<t>/<st>/kmods/<kver>/`）。要覆盖文件就加 `files/`（rootfs 布局）。
+加入某个预设才会默认出现；`implicit: true` 则按 arch/target 自动附加。
 
-**加 target（ARM）**：不能只改 `targets/*.yml`。需要真实的
-`target/subtarget/profile`，ImageBuilder 文件名也会变（`immortalwrt-imagebuilder-<ver>-<target>-<subtarget>...`），
-`build.sh` 里有多处 `x86_64` 硬编码（产物命名、matrix），必须先重构命名再扩展。
-在拿到具体设备型号前**不要**开工。
+**加预设**：`presets/<name>.yml`，写 `modules`、`targets`（或 `all`）、
+`proxy_default`（可写成按 kind 的 map）。tag 矩阵是否需要新预设，改
+`resolve.py::matrix` 里 `chosen` 的规则，并补单测。
 
-**换版本**：`-f version=<ver>` 即可，但 24.10 走 opkg，`nftables-json`、`apk` 相关假设要复核。
+**加设备**：复制一个 `targets/*.yml`，填真实 `target/subtarget/profile/arch`。
+profile 名取自该 target 的 `profiles.json`。ImageBuilder 文件名由
+`immortalwrt-imagebuilder-<ver>-<target>-<subtarget>` 推导，不需要手写。
+Brume 3 的模板是 `targets/brume3.yml`，上游就绪后把 `status` 改成 `ready`。
 
-**改根分区大小**：`ROOTFS_PARTSIZE`（MiB），默认 1024。
+**加第三方**：在 `thirdparty/lock.yml` 新增条目（`type: repo` 或 `binary`），
+每个 arch 都要 url + sha256（GitHub API 的 `digest` 字段可直接用），并在注释里写明
+选择理由与检查日期。`type: repo` 的压缩包必须包含 `packages.adb`（和 `index.json`）。
 
-## 8. 不变量（改代码时不能破）
+**换版本**：`-f version=<ver>`。24.10 走 opkg，`nftables-json`、apk 本地仓库注入、
+manifest 解析这些假设都要复核。
 
-- 只用官方 feed 的包；不引入第三方 ipk，不 pin 到上游项目的最新 tag
-- Action 全部 pin 到 commit SHA（`checkout@11d5960a…`、`upload-artifact@ea165f8d…`、
-  `download-artifact@d3f86a10…`），不要改回 `@v4`
-- 默认 `permissions: contents: read`，只有 release job 用 `contents: write`
-- 不把凭据、订阅 URL、节点信息写进仓库或固件
-- 不在 CI 里跑真实机场节点；CI 只做合成测试
-- 元数据文件名保持 `<NAME>-<ver>-x86_64-<profile>.txt`，release 流程依赖这个模式
-- 不提交二进制（`.gitignore` 已覆盖 `dist/`、`.work/`）
+## 9. 不变量
 
-## 9. 未完成 / 建议的下一步
+- 只用官方 feed 的包；第三方只能来自 `thirdparty/lock.yml`，且 sha256 必须匹配。
+- 多个代理前端可共存安装，但同一时刻只能启用一个（`proxy-guard` 负责）。
+- 默认 `fail-open`：代理持续失败时恢复直连。改 `policy=closed` 要用户显式选择。
+- 不写凭据、订阅、节点到仓库或固件；向导只写设备本地 UCI。
+- Action 全部 pin commit SHA；默认 `contents: read`，只有 release job 用写权限。
+- 不提交二进制；第三方只记录 URL + sha256。
+- 元数据命名 `<NAME>-<ver>-<target>-<preset>.txt`，release 流程依赖它。
+- 解析失败必须让构建在下载 IB 之前就停下（resolve 先跑）。
 
-按价值排序，每项都给了验收标准：
+## 10. 未完成 / 下一步（按价值）
 
-1. **QEMU 冒烟测试**（最高价值）：x86 镜像用 `qemu-system-x86_64` 无头启动，
-   验证 ubus 可用、dnsmasq 起来、firewall4 加载、代理前端服务存在。
-   验收：新 workflow 能在 CI 里跑，失败时能拿到串口日志。
-2. **ARM64 reference target**：等用户给型号。验收：真实 `target/subtarget/profile`，
-   Release 名字里写明设备，不出现"arm64-generic"。
-3. **IPv6 路径测试**：v4/v6 的 DNS、tproxy、route 分别断言。验收：
-   `network-doctor` 的 `IPV6_PROXY_BYPASS` 分类在 CI 合成环境里可复现。
-4. **soak / 生命周期测试**：`start/stop/restart × 100`，确认无重复核心进程、
-   nftables 不重复追加。验收：脚本 + 一台长期在线的测试机。
-5. **诊断脚本落地验证**：`network-doctor.sh` 从未在真实设备上跑过，
-   `classify()` 里的判断逻辑只是启发式。验收：在 x86 虚机上人为制造
-   DNS 失败/规则缺失，确认分类正确。
+1. **首次 CI 构建验证**：14 个组合里先跑 x86-64/standard、gl-mt2500/lite、nanopi-r6s/standard。
+   验收：镜像、manifest、SHA256SUMS、BUILDINFO 齐全，`sha256sum -c` 通过。
+2. **QEMU 冒烟**：x86 镜像无头启动，断言 ubus、dnsmasq、firewall4、代理前端服务存在。
+3. **proxy-guard 行为测试**：人为断网验证 fail-open 切换与恢复，检查 nftables 残留。
+4. **向导真机走查**：四个场景各跑一遍，确认 90 秒回滚真的生效。
+5. **IPv6 路径测试**：v4/v6 的 DNS、tproxy、route 分别断言。
+6. **soak**：start/stop/restart × 100，确认无重复核心进程、规则不重复追加。
 
-## 10. 需要人先回答的四件事
+## 11. 需要人决定的事
 
-1. ARM 实体机型号（决定 target）
-2. 机场订阅格式（Clash YAML / 通用 URL / V2Ray base64 / sing-box JSON）
-3. 宿主与虚拟化平台（PVE / VMware / Hyper-V / Apple Silicon）
-4. 代理失效策略：`fail-open` 还是 `fail-closed`
-
-在拿到 1 之前，不要动 ARM；在拿到 4 之前，不要写 watchdog 的默认行为。
-
-## 11. 诊断与排障约定
-
-- 任何"国内能开、Google 不通"的报障，先跑 `network-doctor.sh` 拿分类，
-  不要直接改 DNS 配置。
-- 不要用"关闭 IPv6"当修复。
-- 不要写 `while true; do restart; done`，用 procd 的 respawn 阈值 + 退避。
-- 订阅/规则更新必须是"下载到临时文件 → 校验 → 原子替换 → 健康检查 → 失败回滚"。
+1. 机场订阅格式（Clash YAML / 通用 URL / V2Ray base64 / sing-box JSON）——
+   决定向导里"导入订阅"能做到哪一步（目前只把 URL 存进本机 UCI，仍需到插件页面粘贴）。
+2. 是否要 ARM VM（armsr）——当前明确不做。
+3. 仓库是否转 public。
+4. 是否需要 frps、OpenClash 进入默认套餐（现在都不进）。
 
 ## 12. 完成标准
 
-改完任何东西，至少跑通：
-
 ```bash
-gh workflow run build-firmware -f version=25.12.2 -f proxy=<受影响的 profile>
-# 等绿
-gh release view 25.12.2 --json assets --jq '.assets|length'   # 数量不应减少
+gh workflow run build-firmware -f target=<t> -f preset=<p>
+# 等绿后
+gh release view <ver> --json assets --jq '.assets[].name' | grep '<t>-<p>'
 ```
 
-涉及 `build.sh` 的改动，还要确认 `dist/` 里三个文件都在：
-镜像、`BUILDINFO-*.txt`、`SHA256SUMS-*.txt`，且 `sha256sum -c` 通过。
-涉及镜像内容的改动，下载 manifest 确认目标包真的在里面，而不是"构建成功"。
+涉及解析器的改动必须 `python3 tests/test_resolve.py -v` 全绿；
+涉及模块的改动必须确认目标包在对应 arch 的 feed 里真实存在（不是"应该存在"）。
+涉及 `build.sh` 的改动要确认 `dist/` 里镜像、manifest、BUILDINFO、SHA256SUMS 四样齐全。

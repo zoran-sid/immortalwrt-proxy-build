@@ -1,0 +1,58 @@
+# 第三方包白名单。只有这里的条目可以进镜像。
+#
+# 选择规则：最新的非 pre-release、发布满 14 天、没有未关闭的严重回归 issue，
+# 且必须提供与 25.12 ABI 匹配的 apk（25.12 起包管理器是 apk，ipk 不能装）。
+# 每个 arch 都记录来源 URL 与 sha256；构建时逐个校验，不匹配直接失败。
+
+nikki:
+  name: Nikki
+  homepage: https://github.com/nikkinikki-org/OpenWrt-nikki
+  license: GPL-2.0
+  type: repo
+  tag: v1.26.2
+  selected_at: 2026-11-14
+  reason: >-
+    v1.26.2 于 2026-10-10 发布，已满 14 天；官方提供 openwrt-25.12 的 apk 仓库包
+    （index.json + packages.adb + 全部 .apk），覆盖 x86_64 与两种 aarch64；
+    mihomo 核心随包，不在运行时下载。
+  packages:
+    - luci-app-nikki
+    - nikki
+    - luci-i18n-nikki-zh-cn
+  arches:
+    x86_64:
+      url: https://github.com/nikkinikki-org/OpenWrt-nikki/releases/download/v1.26.2/nikki_x86_64-openwrt-25.12.tar.gz
+      sha256: 510c4dd3204842ccf41f567198bf95c03bd407173dcdcee0a259af6d5b43fa05
+    aarch64_cortex-a53:
+      url: https://github.com/nikkinikki-org/OpenWrt-nikki/releases/download/v1.26.2/nikki_aarch64_cortex-a53-openwrt-25.12.tar.gz
+      sha256: 6ee657c194fa9010f16a983d13776527f5f113294ac3db1351958b941437405c
+    aarch64_generic:
+      url: https://github.com/nikkinikki-org/OpenWrt-nikki/releases/download/v1.26.2/nikki_aarch64_generic-openwrt-25.12.tar.gz
+      sha256: b83536124b8823acc170cad2063ea7201a462c2e2f04e2235658d485d26bedfe
+
+# OpenClash 的可选模块在构建时把 mihomo 内核写进镜像，避免首次启动联网下载。
+mihomo-core:
+  name: Mihomo
+  homepage: https://github.com/MetaCubeX/mihomo
+  license: GPL-3.0
+  type: binary
+  tag: v1.19.34
+  selected_at: 2026-11-14
+  dest: /etc/openclash/core/clash_meta
+  reason: OpenClash 0.48.002 支持 Meta 内核；固定版本可复现，也不需要设备联网下载。
+  arches:
+    x86_64:
+      url: https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/mihomo-linux-amd64-v1.19.34.gz
+      sha256: 223fab877e5795ce780ba39902e5f0b1113c1256ae244a7160f1165e017e9ccc
+      format: gz
+    aarch64_cortex-a53:
+      url: https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/mihomo-linux-arm64-v1.19.34.gz
+      sha256: daaf78a6240a282cdfd75bcbf98fe321f6bd52765cc29e79f344191198f0b50f
+      format: gz
+    aarch64_generic:
+      url: https://github.com/MetaCubeX/mihomo/releases/download/v1.19.34/mihomo-linux-arm64-v1.19.34.gz
+      sha256: daaf78a6240a282cdfd75bcbf98fe321f6bd52765cc29e79f344191198f0b50f
+      format: gz
+
+# 预留：EasyTier 上游只发 ipk(22.03.7) 与 SNAPSHOT apk，没有 25.12.2 ABI 的资产，
+# 因此 modules/vpn-easytier 标记为 blocked，不在此处启用。

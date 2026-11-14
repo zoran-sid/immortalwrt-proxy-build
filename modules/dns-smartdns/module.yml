@@ -1,0 +1,15 @@
+name: dns-smartdns
+description: SmartDNS 国内外分流解析
+category: dns
+source: official
+conflicts:
+- dns-adguardhome
+- dns-mosdns
+requires: []
+targets: []
+arch: []
+min_flash_mb: 0
+min_ram_mb: 0
+enabled_by_default: false
+implicit: false
+status: ok

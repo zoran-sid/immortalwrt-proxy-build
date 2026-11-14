@@ -1,0 +1,13 @@
+name: notify
+description: 微信推送：设备上下线、代理掉线通知
+category: notify
+source: official
+conflicts: []
+requires: []
+targets: []
+arch: []
+min_flash_mb: 0
+min_ram_mb: 0
+enabled_by_default: true
+implicit: false
+status: ok
