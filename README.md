@@ -168,7 +168,7 @@ dist/BUILDINFO-<ver>-<target>-<preset>.txt   # 模块列表、包、IB 校验和
 | x86-64-vm / standard 构建 | ✅ PASS（run 43554233088） |
 | gl-mt2500 / lite 构建 | ✅ PASS（run 43554228173，factory/sysupgrade.bin） |
 | QEMU 启动（rescue / standard） | ✅ PASS：ubus、procd、dnsmasq A/AAAA、nftables/fw4、SSH、LuCI、WAN、外网、冷启动持久化 |
-| QEMU 内代理切换 / fail-open / 向导回滚 | 见 `docs/validation.md`（按实际执行结果记录） |
+| QEMU 内代理切换 / fail-open / 向导回滚 / 诊断 | ✅ PASS：40/40（run 43563224816 镜像） |
 | ARM 真机启动 | ❌ 未验证（只有构建产物，没有对应硬件） |
 | 真实机场订阅 / 节点出口 | ❌ 未验证（不保存凭据，也不接入真实节点） |
 | IPv6 透明代理 / TProxy 端到端 | ❌ 未验证（QEMU 用户态网络没有可路由的 IPv6 上游） |

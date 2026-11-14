@@ -92,7 +92,8 @@ scripts/build.sh: line 176: PRESET_KIND: unbound variable
 | x86-64-vm / standard | [43554233088](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43554233088) | a57f08d | **PASS** | **PASS**（含 qcow2/vmdk/vhdx/vdi） |
 | gl-mt2500 / lite | [43554228173](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43554228173) | a57f08d | **PASS** | **PASS**（factory/sysupgrade.bin） |
 | x86-64 / standard（watchdog 修复 v1） | [43558113595](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43558113595) | 197152c | **PASS**（build job 已含 verify 步骤） | **PASS** |
-| x86-64 / standard（watchdog 修复 v2，最终） | [43560788676](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43560788676) | 9abb8c4 | 见 §6.1 | 见 §6.1 |
+| x86-64 / standard（watchdog 修复 v2） | [43560788676](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43560788676) | 9abb8c4 | **PASS**（含 verify 步骤） | **PASS** |
+| x86-64 / standard（最终，状态恢复修复） | [43563224816](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43563224816) | 9c0acff | **PASS** | **PASS** |
 
 产物校验（`tests/verify_artifacts.py`）检查：每个 SHA256 条目存在且哈希匹配、
 没有未纳入校验的产物、BUILDINFO 必需键齐全、manifest 非空、文件名符合
@@ -244,7 +245,33 @@ watchdog 最终修复后重建镜像（run 43560788676）的完整复验见 §6.
 
 ---
 
-## 7. 诊断工具（代码审查，运行时待复验）
+### 6.1 最终复验（watchdog 状态恢复修复后）
+
+镜像来自 run 43563224816（commit 9c0acff）。测试脚本会等待看门狗状态转换，
+避免固定 sleep 造成的假失败。结果：
+
+| 分组 | 检查数 | 结果 |
+|---|---|---|
+| 基础环境（wizard/guard/前端/DNS/WAN） | 3 | PASS |
+| proxy-switch（互斥、未安装、失败恢复、重复切换、off） | 11 | PASS |
+| 看门狗（运行、fail-open、恢复尝试、失败后仍直连、fail-closed 保持代理） | 6 | PASS |
+| 向导（非法输入、未安装前端、无副作用、回滚、确认、敏感信息） | 12 | PASS |
+| network-doctor（脱敏、分类、IP 掩码） | 3 | PASS |
+| IPv6 信息项 | 1 | PASS（仅地址存在） |
+| 合计 | 40 | **40 PASS / 0 FAIL** |
+
+其中最关键的三条：
+
+- `guard: fail-open state` + `guard: active record kept`：连续失败后按策略停用代理，
+  但保留 `active=passwall` 供恢复使用。
+- `guard: recovery attempt`：到达 `recover_delay` 后重新启用代理；探针仍失败时
+  回到直连并增大退避。
+- `guard: fail-closed keeps proxy enabled`：把策略改成 closed 并重启守护进程后，
+  持久化的 fail-open 状态会把代理重新启用，而不是悄悄留在直连。
+
+---
+
+## 7. 诊断工具（代码审查 + QEMU 运行时验证）
 
 `scripts/diagnostics/network-doctor.sh` 的真实问题：
 
@@ -255,6 +282,15 @@ watchdog 最终修复后重建镜像（run 43560788676）的完整复验见 §6.
 3. 只凭“Google 不通”就同时报 DNS 与节点故障；现在显式检测 CN/foreign DNS，
    区分 `DNS_LOCAL_FAILURE`、`DNS_FOREIGN_FAILURE`、`NODE_FAILURE`、
    `INTERNET_DOWN`，并且只有代理实际启用时才报 `FIREWALL_RULE_MISSING`。
+
+QEMU 运行时结果（最终镜像）：
+
+- `doctor: secret redacted`：PASS（token 在报告中 0 命中）
+- `doctor: classification printed`：PASS
+- `doctor: --redact-node-ip masks IPs`：PASS（报告里 0 个 223.5.5.5）
+
+仍属代码审查、未在真实故障网络中验证的部分：分类是否命中正确类别、上游 DNS
+不可达/污染场景、订阅 URL 之外的敏感格式（私钥、Token 路径段）。
 
 ---
 

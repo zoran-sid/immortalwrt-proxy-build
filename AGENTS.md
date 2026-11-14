@@ -27,7 +27,7 @@
 | 包名核实（x86_64 / aarch64_cortex-a53 / aarch64_generic） | ✅ 逐包核对过 feed |
 | 重构后 CI 构建（rescue、standard、full、vm、gl-mt2500 lite） | ✅ 全部通过，产物 SHA256/BUILDINFO/manifest 校验通过（`docs/validation.md`） |
 | QEMU 启动冒烟（rescue、standard） | ✅ 12 项检查 + 冷启动持久化通过 |
-| QEMU 内 proxy-switch / fail-open / 向导回滚 | ✅ 见 `docs/validation.md`（按实际结果记录） |
+| QEMU 内 proxy-switch / fail-open / 向导回滚 / 诊断 | ✅ 40/40 PASS（run 43563224816 镜像；`docs/validation.md`） |
 | 向导 UI / proxy-guard / Nikki on ARM | ⚠️ QEMU 内已验证逻辑；**未真机验证** |
 | IPv6 端到端 / soak | ❌ 未做（QEMU 用户态网络无 IPv6 上游） |
 | Brume 3（GL-MT5000） | ⏳ 上游未提供 profile，仅预留 `targets/brume3.yml` |

@@ -68,6 +68,18 @@ def rc(con, cmd, timeout=120):
     return code, out
 
 
+def wait_state(con, value, timeout=45):
+    """Poll proxy-guard.main.state; the watchdog transitions are asynchronous."""
+    deadline = time.time() + timeout
+    state = ""
+    while time.time() < deadline:
+        state = con.command("uci -q get proxy-guard.main.state", timeout=30)[0].strip()
+        if state == value:
+            return state
+        time.sleep(2)
+    return state
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--qemu", default=os.environ.get("QEMU", "qemu-system-x86_64"))
@@ -198,22 +210,34 @@ def main():
             "uci set proxy-guard.main.probe_dns='223.5.5.5 1.1.1.1'; "
             "uci commit proxy-guard; /etc/init.d/proxy-guard restart", timeout=60)
         time.sleep(14)
-        check(con, "guard: fail-open state", "uci -q get proxy-guard.main.state", "failopen", retries=4)
+        state = wait_state(con, "failopen")
+        results.append(("guard: fail-open state", state == "failopen"))
+        print("%s  guard: fail-open state (state=%s)"
+              % ("PASS" if results[-1][1] else "FAIL", state))
         check(con, "guard: active record kept", "uci -q get proxy-guard.main.active", "passwall")
-        time.sleep(24)
-        attempts = con.command("logread | grep -c 'recovery attempt'")[0].strip()
+        deadline = time.time() + 60
+        attempts = "0"
+        while time.time() < deadline:
+            attempts = con.command("logread | grep -c 'recovery attempt'")[0].strip()
+            if attempts.isdigit() and int(attempts) >= 1:
+                break
+            time.sleep(3)
         results.append(("guard: recovery attempted", attempts.isdigit() and int(attempts) >= 1))
         print("%s  guard: recovery attempted (count=%s)"
               % ("PASS" if results[-1][1] else "FAIL", attempts))
-        check(con, "guard: still fail-open after failed recovery",
-              "uci -q get proxy-guard.main.state", "failopen", retries=4)
+        state = wait_state(con, "failopen")
+        results.append(("guard: still fail-open after failed recovery", state == "failopen"))
+        print("%s  guard: still fail-open after failed recovery (state=%s)"
+              % ("PASS" if results[-1][1] else "FAIL", state))
 
         # fail-closed must keep the proxy enabled.
         con.command("/usr/sbin/proxy-switch passwall >/dev/null 2>&1; "
                     "uci set proxy-guard.main.policy='closed'; uci commit proxy-guard; "
                     "/etc/init.d/proxy-guard restart", timeout=90)
-        time.sleep(10)
-        check(con, "guard: fail-closed state", "uci -q get proxy-guard.main.state", "closed")
+        state = wait_state(con, "closed")
+        results.append(("guard: fail-closed state", state == "closed"))
+        print("%s  guard: fail-closed state (state=%s)"
+              % ("PASS" if results[-1][1] else "FAIL", state))
         check(con, "guard: fail-closed keeps proxy enabled",
               "if /etc/init.d/passwall enabled >/dev/null 2>&1; then echo enabled; else echo disabled; fi",
               "enabled")
