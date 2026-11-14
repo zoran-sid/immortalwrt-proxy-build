@@ -268,7 +268,12 @@ def main():
         log.write("\nlog warnings:\n%s\n" % warnings)
 
         if not args.skip_reboot:
-            con.command("uci set system.@system[0].hostname=smoke-test && uci commit system")
+            con.command("uci set system.@system[0].hostname=smoke-test; uci commit system; sync")
+            # f2fs checkpoints lazily; without a short grace period an immediate
+            # poweroff can roll back to the previous checkpoint and drop the
+            # write (verified on the standard image).
+            print("waiting for the f2fs checkpoint before poweroff ...")
+            time.sleep(22)
             print("cold-restarting to test persistence ...")
             con.send("poweroff\r")
             try:
