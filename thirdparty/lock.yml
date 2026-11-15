@@ -9,7 +9,7 @@ homeproxy-sources:
   homepage: https://github.com/immortalwrt/luci
   package: luci-app-homeproxy
   package_version: 26.298.29275~c84adb9
-  sing_box_version: 1.14.4
+  sing_box_version: 1.12.25
   release: 25.12.2
   files:
     generator:

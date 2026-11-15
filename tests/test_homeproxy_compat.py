@@ -6,6 +6,7 @@ This checks the transform; the installer also compiles ucode on the router.
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -65,14 +66,21 @@ const filter = (x, f) => x.filter(f);
         self.assertEqual(result["route"]["rules"][-1], {"action": "reject"})
 
     @unittest.skipUnless(os.environ.get("TEST_SING_BOX"), "real sing-box not configured")
-    def test_real_core_rejects_original_and_accepts_migration(self):
+    def test_real_core_accepts_migration_and_checks_original_by_version(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.json"
             path.write_text(json.dumps(self.fixture()), encoding="utf-8")
             command = [os.environ["TEST_SING_BOX"], "check", "-c", str(path)]
             original = subprocess.run(command, capture_output=True, text=True)
-            self.assertNotEqual(original.returncode, 0)
-            self.assertIn("legacy inbound", original.stderr)
+            version = subprocess.run([os.environ["TEST_SING_BOX"], "version"],
+                                     capture_output=True, text=True, check=True).stdout
+            match = re.search(r"version (\d+)\.(\d+)\.", version)
+            self.assertIsNotNone(match, version)
+            if tuple(map(int, match.groups())) >= (1, 13):
+                self.assertNotEqual(original.returncode, 0)
+                self.assertIn("legacy inbound", original.stderr)
+            else:
+                self.assertEqual(original.returncode, 0, original.stderr)
             path.write_text(json.dumps(self.migrate(self.fixture())), encoding="utf-8")
             fixed = subprocess.run(command, capture_output=True, text=True)
             self.assertEqual(fixed.returncode, 0, fixed.stderr)

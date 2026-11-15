@@ -45,8 +45,11 @@ class CompatibilityBuildTests(unittest.TestCase):
     def test_manifest_drift_blocks_publication(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "image.manifest"
-            path.write_text("luci-app-homeproxy - 26.298.29275~c84adb9\nsing-box - 1.14.4-r1\n")
+            path.write_text("luci-app-homeproxy - 26.298.29275~c84adb9\nsing-box - 1.12.25-r1\n")
             prepare.check_manifest(path)
+            path.write_text("luci-app-homeproxy - 26.298.29275~c84adb9\nsing-box - changed\n")
+            with self.assertRaises(ValueError):
+                prepare.check_manifest(path)
             path.write_text("luci-app-homeproxy - changed\nsing-box - 1.14.4-r1\n")
             with self.assertRaises(ValueError):
                 prepare.check_manifest(path)
