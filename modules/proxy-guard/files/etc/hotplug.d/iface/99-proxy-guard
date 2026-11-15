@@ -3,7 +3,7 @@
 # boot-time rc.d link was missing (plugin UI enable) or the service failed
 # early. The reconcile helper is idempotent and does not restart a running
 # service, so this cannot create duplicate sing-box/nftables state.
-[ "${ACTION:-}" = "ifup" ] || exit 0
+[ "${ACTION:-}" = "ifup" ] || [ "${ACTION:-}" = "ifupdate" ] || exit 0
 case "${INTERFACE:-}" in
 	*wan*) ;;
 	*) exit 0 ;;
