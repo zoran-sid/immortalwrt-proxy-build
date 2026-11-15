@@ -44,7 +44,13 @@ def main():
         wait_ready(con)
         check(con, "baked generator", "grep -q 'unique tags per routing node' /etc/homeproxy/scripts/generate_client.uc && echo BAKED", "BAKED")
         check(con, "maintenance startup link", "/etc/init.d/service-boot enabled && echo ENABLED", "ENABLED")
-        check(con, "PassWall five-second default", "uci -q get 'passwall.@global_delay[0].start_delay'", "5")
+        delay_error = None
+        try:
+            check(con, "PassWall five-second default", "uci -q get 'passwall.@global_delay[0].start_delay'", "5")
+        except AssertionError as error:
+            delay_error = error
+            print("FAIL " + str(error), flush=True)
+            print(sh(con, "ls /etc/uci-defaults; uci -q get wizard.main.done; find /rom/etc/uci-defaults -maxdepth 1 -iname '*passwall*' -print -exec cat '{}' ';'"), flush=True)
         assignments = [
             "homeproxy.config.routing_mode=custom", "homeproxy.config.enabled=1",
             "homeproxy.routing=homeproxy", "homeproxy.routing.default_outbound=test_a",
@@ -87,6 +93,8 @@ def main():
         check(con, "HomeProxy core returns after reboot", "sleep 10; pgrep -f '[s]ing-box[[:space:]]+run[[:space:]].*sing-box-c.json' && echo CORE_RUNNING", "CORE_RUNNING")
         check(con, "enabled DDNS startup link recovered", "/etc/init.d/ddns-go enabled && echo DDNS_ENABLED", "DDNS_ENABLED")
         check(con, "DDNS process after reboot", "pgrep -f '[d]dns-go.*config.yaml' && echo DDNS_RUNNING", "DDNS_RUNNING")
+        if delay_error:
+            raise delay_error
         print("All firmware boot checks passed (no external proxy traffic asserted).", flush=True)
     finally:
         vm.close()
