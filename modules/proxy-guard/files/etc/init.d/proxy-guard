@@ -5,6 +5,11 @@ STOP=10
 USE_PROCD=1
 
 start_service() {
+	# Make HomeProxy's stop/reload log path safe before S99homeproxy runs.
+	if [ -x /usr/sbin/homeproxy-runtime-patch ]; then
+		/usr/sbin/homeproxy-runtime-patch >/dev/null 2>&1
+	fi
+
 	# /var/run is tmpfs: HomeProxy logs into /var/run/homeproxy even on the
 	# reload/stop paths, so create it before any frontend starts.
 	if [ -x /etc/init.d/homeproxy ]; then

@@ -54,6 +54,19 @@ class BootReconcileTests(unittest.TestCase):
         # No fixed sleeps as a readiness workaround.
         self.assertNotIn("sleep", text)
 
+    def test_homeproxy_init_patch_is_hash_guarded(self):
+        text = read("modules", "proxy-guard", "files", "usr", "sbin",
+                    "homeproxy-runtime-patch")
+        self.assertIn("EXPECTED=", text)
+        self.assertIn("homeproxy init hash changed", text)
+        self.assertIn("WAN default route", text)
+        self.assertIn("return 0", text)
+        self.assertIn("mkdir -p", text)
+        # The patch must be validated before replacing the upstream file.
+        self.assertIn("patch failed validation", text)
+        init = read("modules", "proxy-guard", "files", "etc", "init.d", "proxy-guard")
+        self.assertIn("homeproxy-runtime-patch", init)
+
 
 if __name__ == "__main__":
     unittest.main()

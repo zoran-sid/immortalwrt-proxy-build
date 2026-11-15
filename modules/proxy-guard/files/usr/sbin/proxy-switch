@@ -63,7 +63,25 @@ record_active() {
 }
 
 running() {
-	ubus call service list "{\"name\":\"$1\"}" 2>/dev/null | grep -q '"pid"'
+	case "$1" in
+		# HomeProxy keeps a log-cleaner instance alive even when sing-box has
+		# exited, so a generic procd/pid check is a false positive here.
+		homeproxy)
+			pgrep -f '[s]ing-box.*sing-box-[cs]\.json' >/dev/null 2>&1
+			;;
+		passwall)
+			pgrep -f '[x]ray|[s]ing-box' >/dev/null 2>&1
+			;;
+		openclash)
+			pgrep -f '[c]lash' >/dev/null 2>&1
+			;;
+		nikki)
+			pgrep -f '[m]ihomo' >/dev/null 2>&1
+			;;
+		*)
+			ubus call service list "{\"name\":\"$1\"}" 2>/dev/null | grep -q '"pid"'
+			;;
+	esac
 }
 
 # HomeProxy writes its log/config under /var/run/homeproxy before procd starts.

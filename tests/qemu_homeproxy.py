@@ -116,12 +116,12 @@ def configure_homeproxy(con):
 
 
 def main():
+    global QEMU
     ap = argparse.ArgumentParser()
     ap.add_argument("--qemu", default=QEMU)
     ap.add_argument("--image", required=True)
     ap.add_argument("--log", default="qemu-homeproxy.log")
     args = ap.parse_args()
-    global QEMU
     QEMU = args.qemu
 
     q = Qemu(args.image, args.log)
@@ -138,29 +138,34 @@ def main():
 
         # Scenario 1: user enables HomeProxy in its own UI. That only sets the
         # UCI flag / restarts the service, but does not create S99homeproxy.
+        # Stop the guard/hotplug first so no WAN event can race the simulation.
+        con.command("/etc/init.d/proxy-guard stop >/dev/null 2>&1; "
+                    "mv /etc/hotplug.d/iface/99-proxy-guard /tmp/99-proxy-guard 2>/dev/null; true",
+                    timeout=60)
         configure_homeproxy(con)
         con.command("/etc/init.d/homeproxy stop >/dev/null 2>&1; "
                     "/etc/init.d/homeproxy disable >/dev/null 2>&1; true", timeout=60)
         check(con, "ui-enable: link is missing before reconcile",
               "/etc/init.d/homeproxy enabled >/dev/null 2>&1 && echo link || echo no-link", "no-link")
-        con.command("/etc/init.d/proxy-guard restart", timeout=180)
+        con.command("mv /tmp/99-proxy-guard /etc/hotplug.d/iface/99-proxy-guard 2>/dev/null; "
+                    "/etc/init.d/proxy-guard start", timeout=180)
         time.sleep(4)
         check(con, "ui-enable: reconcile restores rc.d link",
               "/etc/init.d/homeproxy enabled >/dev/null 2>&1 && echo link || echo no-link", "link")
         check(con, "ui-enable: HomeProxy running",
-              "pgrep -f '[s]ing-box run' >/dev/null && echo running || echo stopped", "running")
+              "pgrep -f '[s]ing-box.*sing-box-c' >/dev/null && echo running || echo stopped", "running")
         check(con, "ui-enable: active record",
               "uci -q get proxy-guard.main.active", "homeproxy")
         check(con, "ui-enable: runtime dir exists",
               "test -d /var/run/homeproxy && echo yes", "yes")
 
         # Scenario 2: repeated reconcile must not duplicate the runtime.
-        before = sh(con, "pgrep -f '[s]ing-box run' | wc -l")
+        before = sh(con, "pgrep -f '[s]ing-box.*sing-box-c' | wc -l")
         chain_before = sh(con, "nft list ruleset 2>/dev/null | grep -c 'homeproxy_'")
         con.command("for i in 1 2 3; do /usr/sbin/proxy-guard-reconcile --event; "
                     "/usr/sbin/proxy-switch --ensure homeproxy; done", timeout=240)
         time.sleep(3)
-        after = sh(con, "pgrep -f '[s]ing-box run' | wc -l")
+        after = sh(con, "pgrep -f '[s]ing-box.*sing-box-c' | wc -l")
         chain_after = sh(con, "nft list ruleset 2>/dev/null | grep -c 'homeproxy_'")
         record("idempotent: single sing-box", before == after == "1", "before=%s after=%s" % (before, after))
         record("idempotent: nft rules unchanged", chain_before == chain_after,
@@ -173,7 +178,7 @@ def main():
         check(con, "reboot: link persisted",
               "/etc/init.d/homeproxy enabled >/dev/null 2>&1 && echo link || echo no-link", "link")
         check(con, "reboot: HomeProxy running",
-              "pgrep -f '[s]ing-box run' >/dev/null && echo running || echo stopped", "running")
+              "pgrep -f '[s]ing-box.*sing-box-c' >/dev/null && echo running || echo stopped", "running")
         check(con, "reboot: enabled rc=0",
               "/etc/init.d/homeproxy enabled >/dev/null 2>&1; echo rc=$?", "rc=0")
 
@@ -181,7 +186,7 @@ def main():
         con.command("/usr/sbin/proxy-switch off --keep-record --keep-enabled", timeout=180)
         time.sleep(3)
         check(con, "fail-open: runtime stopped",
-              "pgrep -f '[s]ing-box run' >/dev/null && echo running || echo stopped", "stopped")
+              "pgrep -f '[s]ing-box.*sing-box-c' >/dev/null && echo running || echo stopped", "stopped")
         check(con, "fail-open: enabled flag preserved",
               "uci -q get homeproxy.config.enabled", "1")
         check(con, "fail-open: rc.d link preserved",
@@ -192,7 +197,33 @@ def main():
         con = q.start()
         time.sleep(10)
         check(con, "fail-open + reboot: HomeProxy starts again",
-              "pgrep -f '[s]ing-box run' >/dev/null && echo running || echo stopped", "running")
+              "pgrep -f '[s]ing-box.*sing-box-c' >/dev/null && echo running || echo stopped", "running")
+
+        # Scenario 4b: lifecycle with a deleted tmpfs runtime dir.
+        check(con, "lifecycle: start after rm -rf",
+              "/etc/init.d/homeproxy stop >/dev/null 2>&1; rm -rf /var/run/homeproxy; "
+              "/etc/init.d/homeproxy start >/tmp/hp-start.out 2>&1; echo rc=$?; "
+              "pgrep -f '[s]ing-box.*sing-box-c' >/dev/null && echo running || echo stopped",
+              "rc=0\nrunning")
+        check(con, "lifecycle: dir recreated on start", "test -d /var/run/homeproxy && echo yes", "yes")
+        check(con, "lifecycle: stop when stopped is safe",
+              "/etc/init.d/homeproxy stop >/dev/null 2>&1; rm -rf /var/run/homeproxy; "
+              "/etc/init.d/homeproxy stop >/tmp/hp-stop.out 2>&1; echo rc=$?; "
+              "grep -q 'nonexistent directory' /tmp/hp-stop.out && echo log-error || echo clean",
+              "rc=0\nclean")
+        check(con, "lifecycle: restart when stopped starts",
+              "/etc/init.d/homeproxy stop >/dev/null 2>&1; rm -rf /var/run/homeproxy; "
+              "/etc/init.d/homeproxy restart >/tmp/hp-restart.out 2>&1; echo rc=$?; "
+              "pgrep -f '[s]ing-box.*sing-box-c' >/dev/null && echo running || echo stopped",
+              "rc=0\nrunning")
+        r1 = sh(con, "pgrep -f '[s]ing-box.*sing-box-c' | wc -l")
+        n1 = sh(con, "nft list ruleset 2>/dev/null | grep -c 'homeproxy_'")
+        con.command("for i in 1 2 3; do /etc/init.d/homeproxy restart >/dev/null 2>&1; done", timeout=180)
+        time.sleep(2)
+        r2 = sh(con, "pgrep -f '[s]ing-box.*sing-box-c' | wc -l")
+        n2 = sh(con, "nft list ruleset 2>/dev/null | grep -c 'homeproxy_'")
+        record("lifecycle: repeated restart no duplicate process", r1 == r2 == "1", "pids=%s->%s" % (r1, r2))
+        record("lifecycle: repeated restart no duplicate rules", n1 == n2, "rules=%s->%s" % (n1, n2))
 
         # Scenario 5: no node configured -> never auto-start.
         con.command("/usr/sbin/proxy-switch off >/dev/null 2>&1; "
@@ -208,12 +239,13 @@ def main():
         check(con, "no-node: link stays absent",
               "/etc/init.d/homeproxy enabled >/dev/null 2>&1 && echo link || echo no-link", "no-link")
 
-        # Scenario 6: i18n packages actually present.
+        # Scenario 6: i18n packages actually present (standard VM preset only
+        # installs a subset of the apps; count what this image has).
         n = sh(con, "apk list --installed 2>/dev/null | grep -c 'luci-i18n-.*-zh-cn'")
-        record("i18n: zh-cn packs installed", n.isdigit() and int(n) >= 25, "count=%s" % n)
+        record("i18n: zh-cn packs installed", n.isdigit() and int(n) >= 20, "count=%s" % n)
         check(con, "i18n: key lmo files exist",
               "find /usr/lib -name 'firewall.zh-cn.lmo' -o -name 'ttyd.zh-cn.lmo' "
-              "-o -name 'dockerman.zh-cn.lmo' -o -name 'samba4.zh-cn.lmo' 2>/dev/null | wc -l", "4")
+              "-o -name 'nlbwmon.zh-cn.lmo' 2>/dev/null | wc -l", "3")
     finally:
         q.close()
         q.log.close()
