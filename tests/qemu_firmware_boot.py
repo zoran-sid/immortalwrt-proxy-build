@@ -45,11 +45,14 @@ def main():
             assignments += [f"homeproxy.{name}=routing_node", f"homeproxy.{name}.enabled=1",
                             f"homeproxy.{name}.node=test_node"]
         assignments += ["homeproxy.test_u=routing_node", "homeproxy.test_u.enabled=1",
-                        "homeproxy.test_u.node=urltest", "homeproxy.test_u.urltest_nodes=test_node"]
+                        "homeproxy.test_u.node=urltest", "homeproxy.test_u.urltest_interval=300",
+                        "homeproxy.test_u.urltest_tolerance=50", "homeproxy.test_u.urltest_idle_timeout=1800"]
         for value in assignments:
             output = sh(con, "uci set " + shlex.quote(value) + " || echo SET_FAILED")
             if "SET_FAILED" in output:
                 raise AssertionError("Cannot set fixture " + value)
+        check(con, "URLTest fixture uses a UCI list",
+              "uci add_list homeproxy.test_u.urltest_nodes=test_node && echo LIST_OK", "LIST_OK")
         sh(con, "uci commit homeproxy")
         check(con, "real generator and sing-box schema",
               "ucode -S /etc/homeproxy/scripts/generate_client.uc && sing-box check -c /var/run/homeproxy/sing-box-c.json && echo SCHEMA_OK", "SCHEMA_OK")
