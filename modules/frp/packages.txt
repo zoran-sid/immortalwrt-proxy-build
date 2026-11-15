@@ -1,2 +1,3 @@
 luci-app-frpc
+luci-i18n-frpc-zh-cn
 frpc

@@ -5,8 +5,15 @@ luci-ssl
 luci-i18n-base-zh-cn
 luci-theme-argon
 luci-app-argon-config
+luci-i18n-argon-config-zh-cn
 luci-app-ttyd
+luci-i18n-ttyd-zh-cn
 luci-app-attendedsysupgrade
+luci-i18n-attendedsysupgrade-zh-cn
+luci-app-firewall
+luci-i18n-firewall-zh-cn
+luci-app-package-manager
+luci-i18n-package-manager-zh-cn
 curl
 ca-bundle
 kmod-tun

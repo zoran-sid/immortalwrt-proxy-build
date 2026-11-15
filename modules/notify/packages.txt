@@ -1,1 +1,2 @@
 luci-app-wechatpush
+luci-i18n-wechatpush-zh-cn

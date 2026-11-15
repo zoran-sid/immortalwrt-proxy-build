@@ -1,0 +1,13 @@
+#!/bin/sh
+# WAN is up: give the proxy guard a chance to start the saved frontend if the
+# boot-time rc.d link was missing (plugin UI enable) or the service failed
+# early. The reconcile helper is idempotent and does not restart a running
+# service, so this cannot create duplicate sing-box/nftables state.
+[ "${ACTION:-}" = "ifup" ] || [ "${ACTION:-}" = "ifupdate" ] || exit 0
+case "${INTERFACE:-}" in
+	*wan*) ;;
+	*) exit 0 ;;
+esac
+[ -x /usr/sbin/proxy-guard-reconcile ] || exit 0
+/usr/sbin/proxy-guard-reconcile --event >/dev/null 2>&1
+exit 0

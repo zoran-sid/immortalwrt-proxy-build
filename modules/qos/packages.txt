@@ -1,3 +1,5 @@
 luci-app-sqm
+luci-i18n-sqm-zh-cn
 sqm-scripts
 luci-app-appfilter
+luci-i18n-appfilter-zh-cn

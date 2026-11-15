@@ -1,6 +1,8 @@
 luci-app-tailscale-community
+luci-i18n-tailscale-community-zh-cn
 tailscale
 luci-app-zerotier
+luci-i18n-zerotier-zh-cn
 zerotier
 luci-proto-wireguard
 wireguard-tools

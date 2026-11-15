@@ -27,9 +27,9 @@ def module_shell_files():
     for dirpath, _dirnames, filenames in os.walk(os.path.join(ROOT, "modules")):
         for name in filenames:
             path = os.path.join(dirpath, name)
-            rel = os.path.relpath(path, ROOT)
-            if name.endswith(".sh") or "/init.d/" in rel.replace("\\", "/") \
-                    or "uci-defaults" in rel.replace("\\", "/"):
+            rel = os.path.relpath(path, ROOT).replace("\\", "/")
+            if name.endswith(".sh") or "/init.d/" in rel \
+                    or "uci-defaults" in rel or "/hotplug.d/" in rel:
                 out.append(path)
     return sorted(out)
 

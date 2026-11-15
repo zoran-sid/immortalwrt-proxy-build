@@ -1,5 +1,8 @@
 luci-app-ddns-go
+luci-i18n-ddns-go-zh-cn
 luci-app-acme
+luci-i18n-acme-zh-cn
 acme-acmesh
 luci-app-cloudflared
+luci-i18n-cloudflared-zh-cn
 cloudflared

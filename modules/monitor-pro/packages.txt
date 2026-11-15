@@ -1,3 +1,4 @@
 luci-app-netdata
+luci-i18n-netdata-zh-cn
 netdata
 prometheus-node-exporter-lua

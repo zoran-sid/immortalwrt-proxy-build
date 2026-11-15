@@ -14,4 +14,8 @@ fi
 logger -t proxy-guard "first boot: enabling default proxy '$def'"
 /usr/sbin/proxy-switch "$def" >/dev/null 2>&1
 
+# The guard is the boot-time supervisor for the saved frontend choice; make
+# sure its rc.d link exists even if the image was built without it.
+[ -x /etc/init.d/proxy-guard ] && /etc/init.d/proxy-guard enable >/dev/null 2>&1
+
 exit 0

@@ -1,0 +1,81 @@
+#!/bin/sh
+# HomeProxy upstream init makes /var/run/homeproxy before starting, but its
+# stop/reload paths call log() first. On a fresh boot /var/run is tmpfs, so
+# 'restart' on a never-started service prints:
+#   can't create /var/run/homeproxy/homeproxy.log: nonexistent directory
+# and service_stopped() returns the failure of `ip tuntap del` for a missing
+# device, making a stop of an already-stopped service return non-zero.
+#
+# Apply a minimal, hash-guarded patch at boot (before S99homeproxy):
+#   * log() creates RUN_DIR with the sing-box owner first;
+#   * service_stopped() ends with `return 0`;
+#   * start_service() returns early until a WAN default route AND a WAN DNS
+#     server exist. HomeProxy's generator aborts without a DNS server and
+#     produces a config sing-box rejects; the WAN ifup/ifupdate event then
+#     starts it. This replaces the old "start before network is ready" path.
+# If the upstream init changes, the hash no longer matches: log an explicit
+# error and leave the file untouched instead of applying a stale patch.
+set -u
+
+F=/etc/init.d/homeproxy
+MARK="proxy-guard: ensure RUN_DIR before logging"
+# sha256 of /etc/init.d/homeproxy from luci-app-homeproxy 26.298.29275~c84adb9
+# (ImmortalWrt 25.12.2, verified on x86_64/aarch64 feeds).
+EXPECTED="47e624476a7a409209496de47cd64f73fed7dc86698cf6d6ec2b286c25c88340"
+
+[ -f "$F" ] || exit 0
+grep -q "$MARK" "$F" && exit 0
+
+got="$(sha256sum "$F" 2>/dev/null | awk '{print $1}')"
+if [ "$got" != "$EXPECTED" ]; then
+	logger -t proxy-guard "homeproxy init hash changed ($got); run-dir patch NOT applied, review the overlay"
+	exit 0
+fi
+
+tmp="$F.proxy-guard.$$"
+cp -f "$F" "$tmp" 2>/dev/null || exit 1
+
+awk '
+/^log\(\) \{/ {
+	print "# proxy-guard: ensure RUN_DIR before logging"
+	print "log() {"
+	print "    mkdir -p \"$RUN_DIR\" 2>/dev/null"
+	print "    chown sing-box:sing-box \"$RUN_DIR\" 2>/dev/null"
+	next
+}
+{ print }
+' "$F" > "$tmp.log" 2>/dev/null || { rm -f "$tmp" "$tmp.log"; exit 1; }
+
+awk '
+/^service_stopped\(\) \{/ { instopped = 1 }
+instopped && /^}$/ {
+	print "    return 0"
+	print "}"
+	instopped = 0
+	next
+}
+{ print }
+' "$tmp.log" > "$tmp.final" 2>/dev/null || { rm -f "$tmp" "$tmp.log" "$tmp.final"; exit 1; }
+
+awk '
+/^start_service\(\) \{/ {
+	print "start_service() {"
+	print "    # proxy-guard: wait for WAN route + DNS; the interface event starts later"
+	print "    ip route show default 2>/dev/null | grep -q \"^default\" || return 0"
+	print "    if ! ubus call network.interface.wan status 2>/dev/null | grep -q dns-server; then"
+	print "        [ -s /tmp/resolv.conf.d/resolv.conf.auto ] || return 0"
+	print "    fi"
+	next
+}
+{ print }
+' "$tmp.final" > "$tmp.final2" 2>/dev/null || { rm -f "$tmp" "$tmp.log" "$tmp.final" "$tmp.final2"; exit 1; }
+
+if grep -q "$MARK" "$tmp.final2" && grep -q 'WAN route + DNS' "$tmp.final2"; then
+	cat "$tmp.final2" > "$F"
+	logger -t proxy-guard "patched homeproxy init: RUN_DIR, idempotent stop, WAN route gate"
+else
+	logger -t proxy-guard "homeproxy init patch failed validation; left untouched"
+fi
+
+rm -f "$tmp" "$tmp.log" "$tmp.final" "$tmp.final2"
+exit 0

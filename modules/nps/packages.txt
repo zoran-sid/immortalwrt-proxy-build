@@ -1,3 +1,4 @@
 luci-app-nps
+luci-i18n-nps-zh-cn
 npc
 nps
