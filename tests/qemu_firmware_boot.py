@@ -8,6 +8,7 @@ import argparse
 import os
 import shlex
 import sys
+import time
 
 sys.path.insert(0, os.path.dirname(__file__))
 from qemu_homeproxy import Qemu, sh  # noqa: E402
@@ -20,6 +21,18 @@ def check(console, name, command, marker):
     print("PASS " + name, flush=True)
 
 
+def wait_ready(console):
+    # The serial login shell is available before rcS finishes first-boot UCI
+    # defaults. Wait for procd's completion event before testing saved values.
+    for _ in range(60):
+        output = sh(console, "logread | grep -Fq -- '- init complete -' && echo BOOT_READY")
+        if "BOOT_READY" in output:
+            print("PASS system initialization completed", flush=True)
+            return
+        time.sleep(2)
+    raise TimeoutError("First-boot initialization did not complete")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--image", required=True)
@@ -28,6 +41,7 @@ def main():
     vm = Qemu(args.image, args.log)
     try:
         con = vm.start()
+        wait_ready(con)
         check(con, "baked generator", "grep -q 'unique tags per routing node' /etc/homeproxy/scripts/generate_client.uc && echo BAKED", "BAKED")
         check(con, "maintenance startup link", "/etc/init.d/service-boot enabled && echo ENABLED", "ENABLED")
         check(con, "PassWall five-second default", "uci -q get 'passwall.@global_delay[0].start_delay'", "5")
@@ -68,6 +82,7 @@ def main():
         sh(con, "uci set ddns-go.config.enabled=1; uci commit ddns-go; /etc/init.d/ddns-go disable")
         vm.poweroff()
         con = vm.start()
+        wait_ready(con)
         check(con, "HomeProxy choice persists after reboot", "uci -q get proxy-guard.main.active", "homeproxy")
         check(con, "HomeProxy core returns after reboot", "sleep 10; pgrep -f '[s]ing-box[[:space:]]+run[[:space:]].*sing-box-c.json' && echo CORE_RUNNING", "CORE_RUNNING")
         check(con, "enabled DDNS startup link recovered", "/etc/init.d/ddns-go enabled && echo DDNS_ENABLED", "DDNS_ENABLED")

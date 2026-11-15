@@ -1,0 +1,46 @@
+name: verify-saved-firmware-boot
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: "Build run containing the firmware artifact (same repository)"
+        required: true
+      artifact:
+        description: "Artifact name of an x86 standard/full image"
+        required: true
+        default: firmware-25.12.2-x86-64-vm-standard
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  boot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          run-id: ${{ inputs.run_id }}
+          name: ${{ inputs.artifact }}
+          github-token: ${{ github.token }}
+          path: dist
+      - name: Verify and boot the saved image
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends qemu-system-x86
+          python3 tests/verify_artifacts.py dist
+          image=$(find dist/images -maxdepth 1 -name '*squashfs-combined.img.gz' -print -quit)
+          test -n "$image"
+          gzip -dc "$image" > /tmp/firmware-boot.img
+          python3 tests/qemu_firmware_boot.py --image /tmp/firmware-boot.img --log qemu-firmware-boot.log
+      - name: Upload boot diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: boot-recheck-${{ github.run_id }}
+          path: qemu-firmware-boot.log*
+          if-no-files-found: ignore
+          overwrite: true
