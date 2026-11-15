@@ -149,6 +149,14 @@ jobs:
           test -n "$image"
           gzip -dc "$image" > /tmp/firmware-boot.img
           python3 tests/qemu_firmware_boot.py --image /tmp/firmware-boot.img --log qemu-firmware-boot.log
+      - name: Save verified firmware after a recheck
+        if: inputs.verify_run_id != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verified-firmware-${{ needs.plan.outputs.version }}-x86-64-vm-standard
+          path: dist/**
+          retention-days: 14
+          if-no-files-found: error
       - name: Upload boot diagnostics
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
