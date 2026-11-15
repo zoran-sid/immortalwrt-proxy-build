@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""HomeProxy boot-persistence / fail-open / i18n tests on a real x86 image.
+"""HomeProxy state-machine / fail-open / i18n tests on a real x86 image.
 
 Covers, in order:
   1. enabling HomeProxy in its own UI (UCI flag only, no rc.d link) is
      reconciled by the guard and survives a cold reboot;
-  2. reconcile is idempotent (no duplicate sing-box / nftables rules);
+  2. reconcile is idempotent (no duplicate nftables state);
   3. fail-open stops the runtime but preserves enabled flag + rc.d link, so a
-     reboot starts the user's proxy again;
+     reboot keeps the user's choice;
   4. an unconfigured HomeProxy (no node/server) is not started automatically;
-  5. the zh-cn LuCI language packs are actually installed.
+  5. the zh-cn LuCI language packs are actually installed;
+  6. deleting the tmpfs run dir no longer breaks start/stop/restart.
 
-Requires the image built from fix/homeproxy-boot-persistence.
+The proxy data plane (sing-box actually proxying) needs a valid node or
+subscription and is therefore NOT asserted here; run it on a device with the
+user's real configuration.
 """
 import argparse
 import os
@@ -206,7 +209,9 @@ def main():
               "/etc/init.d/homeproxy stop >/dev/null 2>&1; rm -rf /var/run/homeproxy; "
               "/etc/init.d/homeproxy start >/tmp/hp-start.out 2>&1; echo rc=$?",
               "rc=0")
-        check(con, "lifecycle: dir recreated on start", "test -d /var/run/homeproxy && echo yes", "yes")
+        check(con, "lifecycle: guard recreates runtime dir",
+              "rm -rf /var/run/homeproxy; /etc/init.d/proxy-guard restart >/dev/null 2>&1; "
+              "test -d /var/run/homeproxy && echo yes", "yes")
         check(con, "lifecycle: stop when stopped is safe",
               "/etc/init.d/homeproxy stop >/dev/null 2>&1; rm -rf /var/run/homeproxy; "
               "/etc/init.d/homeproxy stop >/tmp/hp-stop.out 2>&1; echo rc=$?; "

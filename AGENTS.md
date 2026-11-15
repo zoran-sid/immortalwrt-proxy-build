@@ -23,11 +23,12 @@
 | 项 | 状态 |
 |---|---|
 | 结构重构（targets/modules/presets/resolve/build/workflows） | ✅ 已完成 |
-| 解析器/构建契约/BusyBox/回归测试（37 项） | ✅ 本地与 CI 通过 |
+| 解析器/构建契约/BusyBox/HomeProxy/i18n 回归测试（46 项） | ✅ 本地与 CI 通过 |
 | 包名核实（x86_64 / aarch64_cortex-a53 / aarch64_generic） | ✅ 逐包核对过 feed |
 | 重构后 CI 构建（rescue、standard、full、vm、gl-mt2500 lite） | ✅ 全部通过，产物 SHA256/BUILDINFO/manifest 校验通过（`docs/validation.md`） |
 | QEMU 启动冒烟（rescue、standard） | ✅ 12 项检查 + 冷启动持久化通过 |
 | QEMU 内 proxy-switch / fail-open / 向导回滚 / 诊断 | ✅ 40/40 PASS（run 43563224816 镜像；`docs/validation.md`） |
+| HomeProxy 重启持久化 / fail-open 保留 / i18n | ✅ 状态机 23/23 PASS（run 43689978067 镜像）；数据面需真实节点（`docs/homeproxy-boot.md`） |
 | 向导 UI / proxy-guard / Nikki on ARM | ⚠️ QEMU 内已验证逻辑；**未真机验证** |
 | IPv6 端到端 / soak | ❌ 未做（QEMU 用户态网络无 IPv6 上游） |
 | Brume 3（GL-MT5000） | ⏳ 上游未提供 profile，仅预留 `targets/brume3.yml` |
@@ -86,6 +87,8 @@ tests/test_module_scripts.py 设备端 shell/UI 静态回归（BusyBox、脱敏�
 tests/verify_artifacts.py 构建产物完整性校验
 tests/qemu_smoke.py     QEMU 启动冒烟（串口控制台）
 tests/qemu_runtime.py   QEMU 内 proxy-switch / watchdog / 向导 / 诊断测试
+tests/qemu_homeproxy.py QEMU 内 HomeProxy 状态机 / fail-open / i18n / 生命周期
+docs/homeproxy-boot.md  HomeProxy 重启失败的根因、补丁与验证记录
 ```
 
 产物命名：`immortalwrt-<ver>-<target>-<preset>-<格式>`，元数据
@@ -163,6 +166,24 @@ custom 构建的 preset 是 `custom-<sha256(排序模块列表)[:8]>`。
 20. **新增**：QEMU 串口在 TCG 高负载下会丢字符。测脚本要限制发送速率、用成帧
     输出（`@@B`/`@@E`）解析，不能依赖一次 `send` 完整到达，也不能依赖 `$?`
     单独标记（可能整行被截断）。
+21. **新增**：看门狗的 fail-open 不能清用户选择。旧代码 `proxy-switch off
+    --keep-record` 会同时清 `homeproxy.config.enabled` 并删 `/etc/rc.d/S99*`，
+    重启后代理永远不启动。现在 fail-open 用 `--keep-enabled`，只停运行时。
+22. **新增**：HomeProxy 上游 init 的 `log()` 在第 26 行，而 `mkdir -p
+    /var/run/homeproxy` 在 `start_service()` 第 51 行；`restart` 先走
+    `stop_service()` 的日志，所以目录不存在时会报
+    `/etc/rc.common: line 27: can't create ...`。`Command failed: Not found`
+    来自 `rc.common stop` → `procd_kill` → `ubus call service delete`（无实例），
+    不是配置错误。修复用 hash 保护的 `homeproxy-runtime-patch`：log 前建目录、
+    `service_stopped` 返回 0、无 WAN DNS 时延迟启动。
+23. **新增**：HomeProxy 在 WAN/DNS 就绪前启动会生成缺 `local-dns` 的坏配置，
+    sing-box 以 `default DNS server not found` 退出；而且 `log-cleaner` 实例会让
+    “服务在运行”的 ubus 判断成为假阳性。`proxy-switch running()` 对 HomeProxy
+    改用 `sing-box ... sing-box-c.json` 进程判断；开机/WAN `ifup`/`ifupdate`
+    由 `proxy-guard-reconcile` 收敛。
+24. **新增**：LuCI 中文不是自动的。每个 `luci-app-*` 需要显式的
+    `luci-i18n-*-zh-cn` 包；`tests/test_i18n.py` 会检查模块是否漏装。
+    adguardhome/openclash 上游没有独立 zh-cn 包（OpenClash 自带中文）。
 
 ## 8. 改动指南
 

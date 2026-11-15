@@ -68,6 +68,41 @@ HomeProxy 的 `stop_service()` / `reload_service()` 在 `start_service()` 创建
 就调用 `log()` 写 `/var/run/homeproxy/homeproxy.log`，于是出现
 `nonexistent directory`。这不阻止启动，但会污染日志、掩盖真实错误。
 
+### 2.5 源码证据与两个报错的独立解释
+
+实际镜像中的文件（luci-app-homeproxy `26.298.29275~c84adb9`）：
+
+| 文件 | 行 | 内容 |
+|---|---|---|
+| `/etc/init.d/homeproxy` | 15–16 | `RUN_DIR="/var/run/homeproxy"`、`LOG_PATH="$RUN_DIR/homeproxy.log"` |
+| 同上 | 26–28 | `log() { echo ... >> "$LOG_PATH"; }`（**不做目录检查**） |
+| 同上 | 30 / 51 | `start_service()`；直到第 51 行才 `mkdir -p "$RUN_DIR"` |
+| 同上 | 253 | 启动成功后才 `log "sing-box ... started."` |
+| 同上 | 256 / 314 | `stop_service()`；末尾 `log "Service stopped."`（**在 start 的 mkdir 之前**） |
+| 同上 | 317–326 | `service_stopped()` 最后执行 `ip tuntap del`，设备不存在时返回非 0 |
+| 同上 | 335–337 | `service_triggers()` 注册 `interface.*.up` wan → `homeproxy reload` |
+| `rc.common` | 23–28 | `restart() { trap '' TERM; stop; trap - TERM; start; }`，第 27 行是 `start` |
+| `rc.common` | 156–163 | `stop() { procd_lock; stop_service; procd_kill; service_stopped; }` |
+| `/lib/functions/procd.sh` | `_procd_kill()` | `ubus call service delete` |
+
+由此可以精确回答：
+
+1. **为什么目录不存在时 restart 报错？**`restart` 先 `stop_service()`；它在第 314
+   行写日志，而 `mkdir -p "$RUN_DIR"` 只在 `start_service()` 第 51 行。目录不存在
+   时 `log()` 的重定向失败。报错前缀指向 `rc.common` 第 27 行（restart 的 start
+   调用点），实际写入者是 HomeProxy 的 `log()`。
+2. **错误发生在 stop 阶段吗？**是。`stop_service()` 的日志写入发生在
+   `start_service()` 创建目录之前。
+3. **`Command failed: Not found` 从哪来？**`rc.common stop()` → `procd_kill()` →
+   `ubus call service delete`；服务本来就没有运行实例时 ubus 返回 `Not found`。
+   它不是配置错误，也不是 sing-box 崩溃。
+4. **为什么 `start` 能恢复？**`start_service()` 第 51 行先 `mkdir -p "$RUN_DIR"`，
+   再生成配置并启动 sing-box；服务未运行时没有 stop 阶段的日志问题。
+5. **上游实现是否一致？**是。25.12.2 feed 的 `luci-app-homeproxy` 就是上述脚本；
+   2026-11-15 核对 x86_64 / aarch64_cortex-a53 / aarch64_generic 三个架构。
+6. **是否版本兼容问题？**不是 OpenWrt 版本不兼容，而是上游 init 的初始化顺序 +
+   本仓库 fail-open 清 enable 状态的组合问题。
+
 ## 3. 修复
 
 遵循现有模块系统，不新增配置管理框架。
@@ -107,6 +142,24 @@ proxy-switch off --keep-record --keep-enabled
 `proxy-guard` init 在 watchdog 之前创建 `/var/run/homeproxy` 并 chown，消除
 HomeProxy reload/stop 的日志目录错误。
 
+### 3.4 上游 init 的最小补丁（hash 保护）
+
+`/usr/sbin/homeproxy-runtime-patch` 在每次开机、S99homeproxy 之前运行：
+
+- 校验 `/etc/init.d/homeproxy` 的 sha256 是否为固定上游版本
+  `47e6244...`；不匹配时**只记录错误、不修改文件**（避免把补丁套到未知版本）。
+- 仅在匹配时插入三处最小修改：
+  1. `log()` 开头 `mkdir -p "$RUN_DIR"` + `chown sing-box:sing-box`；
+  2. `service_stopped()` 末尾 `return 0`（停止未运行服务不再返回非 0）；
+  3. `start_service()` 开头等待 WAN 默认路由 + DNS（ubus `dns-server` 或
+     `/tmp/resolv.conf.d/resolv.conf.auto`），否则直接返回，由 WAN
+     `ifup/ifupdate` 事件再启动；避免在 DNS 未就绪时生成
+     `default DNS server not found` 的坏配置。
+- 补丁先在临时文件里生成并校验（标记 + 语法），通过后才 `cat >` 覆盖原文件，
+  保留原权限；失败时不动原文件。
+- 上游升级导致 hash 变化时，构建/首次启动日志会明确报
+  `homeproxy init hash changed ... patch NOT applied`，需要人工复核。
+
 ### 3.5 中文语言包
 
 审计所有模块的 LuCI 应用，补齐上游存在的 `luci-i18n-<app>-zh-cn`：
@@ -132,6 +185,7 @@ HomeProxy reload/stop 的日志目录错误。
 | `modules/proxy-guard/files/usr/sbin/proxy-switch` | `--keep-enabled/--ensure/--no-start`、运行目录 |
 | `modules/proxy-guard/files/usr/sbin/proxy-guard-watchdog` | fail-open 保留启用状态 |
 | `modules/proxy-guard/files/usr/sbin/proxy-guard-reconcile`（新增） | 开机/WAN 事件收敛 |
+| `modules/proxy-guard/files/usr/sbin/homeproxy-runtime-patch`（新增） | 上游 init 的 hash 保护补丁 |
 | `modules/proxy-guard/files/etc/hotplug.d/iface/99-proxy-guard`（新增） | WAN up 事件驱动 |
 | `modules/proxy-guard/files/etc/init.d/proxy-guard` | 启动前建目录 + reconcile |
 | `modules/proxy-guard/files/etc/uci-defaults/90-proxy-guard` | 确保 guard 自启 |
@@ -151,16 +205,22 @@ HomeProxy reload/stop 的日志目录错误。
 
 ## 6. 测试
 
-（本节由实际执行结果填写，见提交时的 `docs/validation.md` 与 QEMU 日志。）
+实际执行结果（镜像 run `43689978067`，commit `747f2b5`）：
 
-- 静态测试：45 项（含 fail-open 保留、reconcile、hotplug、i18n 完整性）。
-- QEMU 真实镜像：
-  - 插件 UI 式启用（只有 UCI 标志、无 rc.d 链接）→ reconcile 建链接并启动
-  - 冷重启 → HomeProxy 自动运行
-  - fail-open → 停止运行但保留标志/链接；再次重启仍能启动
-  - 无节点 → 不自动启动、不建链接
-  - 重复 reconcile → 单个 sing-box、nftables 规则数不变
-  - zh-cn lmo 文件实际存在
+- 静态测试：46 项 PASS（解析器、构建契约、BusyBox、fail-open 保留、reconcile、
+  hotplug、i18n 完整性）。
+- QEMU 真实镜像状态机测试：**23/23 PASS**
+  - 插件 UI 式启用（只有 UCI 标志、无 rc.d 链接）→ reconcile 建链接、active 记录
+  - 冷重启后 rc.d 链接、active 记录、`enabled` 状态保持
+  - fail-open 后停止运行但保留 `enabled=1`、S99 链接、active；再次冷启动链接仍在
+  - 无节点：不自动启动、不建链接
+  - 删除 `/var/run/homeproxy` 后 stop/restart 返回 0，无 `nonexistent directory`
+  - 连续 restart 不增加 nftables 规则
+  - zh-cn 语言包与 lmo 文件实际存在
+- **未验证（BLOCKED）**：带真实节点/订阅的 HomeProxy 数据面在冷启动后是否立即
+  恢复代理。QEMU 中无法凭空构造一个被 `generate_client.uc` 接受的真实节点；
+  自造的 custom/direct 与假节点都被生成器拒绝，因此**不把状态机通过当成代理
+  数据面通过**。需在用户自己的节点配置上执行 §7 的验证步骤。
 
 ## 7. 升级/验证步骤
 
@@ -179,3 +239,47 @@ HomeProxy reload/stop 的日志目录错误。
 如果旧固件上已经被 fail-open 清成 `enabled=0`，升级后 guard 会依据
 `proxy-guard.main.active` + `state=failopen` 重新启用；若用户是手动关闭的
 （`active=off`），不会擅自启动。
+
+## 8. 当前运行固件的临时修复（不刷机）
+
+在旧固件上执行：
+
+```sh
+mkdir -p /var/run/homeproxy
+chown sing-box:sing-box /var/run/homeproxy
+/etc/init.d/homeproxy enable        # 重建 S99homeproxy
+/etc/init.d/homeproxy start
+```
+
+这能让本次运行恢复；但**重启后仍可能被旧的 fail-open 再次清掉 enabled 状态**，
+所以只是临时方案。永久修复需要刷入包含本提交的新固件。
+
+## 9. 回滚办法
+
+1. 刷机前备份：
+   ```sh
+   sysupgrade -b /tmp/backup-$(date +%s).tar.gz
+   ```
+   并保存旧固件镜像。
+2. 新固件异常时，用旧镜像 sysupgrade；`/etc/config` 默认保留。
+3. 如需临时停用新的 reconcile/guard（会失去 fail-open 修复）：
+   ```sh
+   /etc/init.d/proxy-guard disable
+   /etc/init.d/homeproxy enable
+   /etc/init.d/homeproxy restart
+   ```
+4. 恢复备份：
+   ```sh
+   sysupgrade -r /tmp/backup-*.tar.gz
+   ```
+
+## 10. 剩余风险 / 未完成
+
+- **数据面未验证**：无真实节点/订阅，QEMU 只能验证状态机与配置持久化，不能证明
+  冷启动后 sing-box 一定成功代理；需在真实节点上按 §7 验证。
+- **上游 init 补丁依赖版本 hash**：`luci-app-homeproxy` 升级后 hash 变化，补丁会
+  明确报错并跳过；早期目录创建和 reconcile 仍有效，但 `stop` 幂等/DNS 门控需要
+  人工复核补丁。
+- **ARM 未做真机启动验证**；只验证了 x86-64-vm 构建与 QEMU。
+- 多代理插件共存只验证了“不会同时启动”的状态收敛，未做真实数据面并发测试。
+- IPv6、DNS 污染、长时间 soak 未测试。
