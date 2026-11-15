@@ -122,18 +122,21 @@ class Console:
 
         The console echoes the command and may split reads anywhere, so the
         result is written to a file and every output line is prefixed with
-        '@@', framed by '@@B' / '@@E:<rc>' lines. The echoed command itself
+        '@@', framed by command-specific begin/end lines. The echoed command itself
         starts with '(' so it can never be mistaken for a framed line.
         """
         self.clear()
+        self.command_seq = getattr(self, "command_seq", 0) + 1
+        begin = "@@B:%08x" % self.command_seq
+        end = "@@E:%08x" % self.command_seq
         # Do not depend on a separate return-code marker: under TCG the guest
         # occasionally drops bytes from long console lines, and a lost marker
         # used to make every check look like a failure. Commands that need an
         # exit code echo it into their own output instead.
         wrapped = (
             "( %s ) >/tmp/.smk.out 2>&1; "
-            "printf '@@B\\n'; sed 's/^/@@/' /tmp/.smk.out; "
-            "printf '\\n@@E\\n'\r" % cmd
+            "printf '%s\\n'; sed 's/^/@@/' /tmp/.smk.out; "
+            "printf '\\n%s\\n'\r" % (cmd, begin, end)
         )
         self.send(wrapped, slow=True)
         deadline = time.time() + timeout
@@ -141,7 +144,7 @@ class Console:
         while time.time() < deadline:
             raw += self.read(1)
             text = raw.decode("utf-8", "replace")
-            if "@@E" in text.splitlines():
+            if end in text.splitlines():
                 break
         else:
             raise TimeoutError("command timeout: %s" % cmd)
@@ -150,10 +153,10 @@ class Console:
         body = []
         inside = False
         for line in lines:
-            if line == "@@B":
+            if line == begin:
                 inside = True
                 continue
-            if inside and line == "@@E":
+            if inside and line == end:
                 break
             if inside and line.startswith("@@"):
                 body.append(line[2:])
