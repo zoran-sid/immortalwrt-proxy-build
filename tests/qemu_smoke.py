@@ -141,7 +141,7 @@ class Console:
         while time.time() < deadline:
             raw += self.read(1)
             text = raw.decode("utf-8", "replace")
-            if any(line.startswith("@@E") for line in text.splitlines()):
+            if "@@E" in text.splitlines():
                 break
         else:
             raise TimeoutError("command timeout: %s" % cmd)
@@ -150,10 +150,10 @@ class Console:
         body = []
         inside = False
         for line in lines:
-            if line.startswith("@@B"):
+            if line == "@@B":
                 inside = True
                 continue
-            if inside and line.startswith("@@E"):
+            if inside and line == "@@E":
                 break
             if inside and line.startswith("@@"):
                 body.append(line[2:])

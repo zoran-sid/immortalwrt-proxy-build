@@ -1,6 +1,6 @@
 # 固件层启动修复与预设精简
 
-2026-11-15。本次修复面向 ImageBuilder 固件本身，设备无需再安装临时修复包。
+2026-11-16。本次修复面向 ImageBuilder 固件本身，设备无需再安装临时修复包。
 
 ## 构建内置兼容补丁
 
@@ -19,6 +19,8 @@ HomeProxy 源码及 SHA256，生成 FILES 覆盖层：
 官方 25.12.2 feed 的 sing-box 是 1.12.25，镜像使用该官方包；你设备上的 1.14.4
 不代表官方包版本。兼容迁移同时按 1.12.25 和 1.14.4 校验，发布检查锁定实际
 官方包版本，防止软件源更新后未经复核就继续打包。
+另以两个核心逐一反编译验证了 RouteMint cn-mainland / ads-light 的全部 29 个
+当前发布规则；实际 SRS 版本均为 2，两种核心均能读取。
 
 ## 保留用户选择
 
@@ -71,6 +73,12 @@ FRP、Docker、Samba、Tailscale 等由上游原生启动链接/procd 管理，�
 幂等。构建工作流对 x86-64-vm/standard 自动做真实镜像 QEMU 启动及重启检查：
 预置生成器、PassWall 延时、共享节点生成配置校验、HomeProxy 核心重启自启、
 DDNS-GO 缺失启动链接恢复及进程检查。
+
+最新回归 [43732539852](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43732539852)：
+91 项，90 项通过，1 项需要外部核心路径而跳过；该项已在本机分别使用官方
+sing-box 1.12.25 与 1.14.4 补测通过。
+GL-MT2500 standard [43732448316](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43732448316)
+构建及 SHA256/BUILDINFO/manifest 校验通过；未做 ARM 真机启动测试。
 
 QEMU 使用本地虚拟 SOCKS 节点检查配置与进程，不代表真实代理数据面或 ARM
 真机验证。具体构建运行和结果在验证后补录；尚未验证的镜像不得宣称稳定可用。

@@ -1,7 +1,7 @@
 # RouteMint 内地规则导入 HomeProxy
 
-适用：本仓库修复后的 HomeProxy（官方 c84adb9 生成器，已安装 sing-box 1.14
-兼容补丁）。安装包：`python scripts/package_routemint.py` →
+适用：本仓库修复后的 HomeProxy（官方 c84adb9 生成器兼容补丁；
+核心 sing-box 1.12.25 / 1.14.4）。安装包：`python scripts/package_routemint.py` →
 `dist/routemint-homeproxy-cn.tar.gz`。
 
 上传到设备 `/tmp/` 后执行：
