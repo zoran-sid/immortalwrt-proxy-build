@@ -1,5 +1,6 @@
 #!/bin/sh
 # Fresh installs use a short delay; keep an existing user's upgrade settings.
+# Run after luci-passwall, which creates /etc/config/passwall on first boot.
 [ "$(uci -q get wizard.main.done 2>/dev/null)" = "1" ] && exit 0
 [ -f /etc/config/passwall ] || exit 0
 uci -q get 'passwall.@global_delay[0]' >/dev/null 2>&1 || uci add passwall global_delay >/dev/null
