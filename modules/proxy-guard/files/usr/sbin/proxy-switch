@@ -1,24 +1,37 @@
 #!/bin/sh
-# proxy-switch <passwall|homeproxy|nikki|openclash|off> [--keep-record]
+# proxy-switch <passwall|homeproxy|nikki|openclash|off> [--keep-record] [--keep-enabled]
+# proxy-switch --ensure <passwall|homeproxy|nikki|openclash>
 #
 # 只允许一个代理前端处于启用状态：停用其余前端、清理其残留 nftables 表，
 # 再启用目标前端。失败时返回非 0，不静默吞掉错误。
 #
-# 安全语义：目标前端不存在时在改动任何状态之前就失败；目标前端启动失败时
-# 尝试恢复切换前的前端，恢复不了就把 active 记为 off，保证不会留下
-# "UCI 说 A 在跑、实际没有任何代理" 的假象。
+# 两种“停用”必须区分：
+#   * 用户明确关闭 / 切换前端：同时停止服务、清 enabled 标志、删 rc.d 链接。
+#   * fail-open 临时直连：只停止运行中的服务，保留 enabled 标志和 rc.d 链接，
+#     这样重启后用户的选择仍然有效（--keep-enabled）。
 set -u
 
-ACTIVE="${1:-}"
-KEEP=0
-case "$ACTIVE" in
-	passwall|homeproxy|nikki|openclash|off) ;;
-	*)
-		echo "usage: proxy-switch <passwall|homeproxy|nikki|openclash|off> [--keep-record]" >&2
-		exit 2
-		;;
-esac
-[ "${2:-}" = "--keep-record" ] && KEEP=1
+ACTIVE=""
+ENSURE=0
+NO_START=0
+KEEP_RECORD=0
+KEEP_ENABLED=0
+
+for arg in "$@"; do
+	case "$arg" in
+		--ensure)       ENSURE=1 ;;
+		--no-start)     NO_START=1 ;;
+		--keep-record)  KEEP_RECORD=1 ;;
+		--keep-enabled) KEEP_ENABLED=1 ;;
+		passwall|homeproxy|nikki|openclash|off) ACTIVE="$arg" ;;
+		*)
+			echo "usage: proxy-switch <passwall|homeproxy|nikki|openclash|off> [--keep-record] [--keep-enabled]" >&2
+			echo "       proxy-switch --ensure <passwall|homeproxy|nikki|openclash>" >&2
+			exit 2
+			;;
+	esac
+done
+[ -n "$ACTIVE" ] || { echo "proxy-switch: missing frontend" >&2; exit 2; }
 
 SVCS="passwall homeproxy nikki openclash"
 LOCK=/var/lock/proxy-switch.lock
@@ -49,6 +62,26 @@ record_active() {
 	uci -q commit proxy-guard 2>/dev/null || true
 }
 
+running() {
+	ubus call service list "{\"name\":\"$1\"}" 2>/dev/null | grep -q '"pid"'
+}
+
+# HomeProxy writes its log/config under /var/run/homeproxy before procd starts.
+# /var/run is tmpfs, so the directory has to exist on every boot before any
+# reload/stop path logs to it.
+ensure_runtime_dir() {
+	case "$1" in
+		homeproxy)
+			mkdir -p /var/run/homeproxy 2>/dev/null || true
+			chmod 755 /var/run/homeproxy 2>/dev/null || true
+			chown sing-box:sing-box /var/run/homeproxy 2>/dev/null || true
+			;;
+		passwall)  mkdir -p /var/run/passwall 2>/dev/null || true ;;
+		openclash) mkdir -p /var/run/openclash 2>/dev/null || true ;;
+		nikki)     mkdir -p /var/run/nikki 2>/dev/null || true ;;
+	esac
+}
+
 cleanup_tables() {
 	for t in passwall homeproxy nikki openclash; do
 		if nft list table inet "$t" >/dev/null 2>&1; then
@@ -59,8 +92,7 @@ cleanup_tables() {
 	done
 }
 
-# Serialise concurrent switches (UI + watchdog + first-boot hook). A stale lock
-# from a killed process is dropped after 5 minutes.
+# Serialise concurrent switches (UI + watchdog + boot reconcile + hotplug).
 if ! mkdir "$LOCK" 2>/dev/null; then
 	if [ -n "$(find "$LOCK" -maxdepth 0 -mmin +5 2>/dev/null)" ]; then
 		log "removing stale lock $LOCK"
@@ -87,39 +119,52 @@ for s in $SVCS; do
 	[ "$s" = "$ACTIVE" ] && continue
 	svc_installed "$s" || continue
 	log "disabling $s"
-	set_enabled "$s" 0
+	[ "$KEEP_ENABLED" -eq 1 ] || set_enabled "$s" 0
 	/etc/init.d/"$s" stop >/dev/null 2>&1
-	/etc/init.d/"$s" disable >/dev/null 2>&1
+	[ "$KEEP_ENABLED" -eq 1 ] || /etc/init.d/"$s" disable >/dev/null 2>&1
 done
 
 cleanup_tables
 
 if [ "$ACTIVE" != "off" ]; then
+	ensure_runtime_dir "$ACTIVE"
 	log "enabling $ACTIVE"
 	set_enabled "$ACTIVE" 1
 	/etc/init.d/"$ACTIVE" enable >/dev/null 2>&1
-	if ! /etc/init.d/"$ACTIVE" restart >/dev/null 2>&1; then
-		log "failed to start $ACTIVE"
-		/etc/init.d/"$ACTIVE" stop >/dev/null 2>&1
-		cleanup_tables
-		if [ -n "$PREV" ] && [ "$PREV" != "off" ] && [ "$PREV" != "$ACTIVE" ] && svc_installed "$PREV"; then
-			log "restoring previous frontend $PREV"
-			set_enabled "$PREV" 1
-			/etc/init.d/"$PREV" enable >/dev/null 2>&1
-			if /etc/init.d/"$PREV" restart >/dev/null 2>&1; then
-				[ "$KEEP" -eq 1 ] || record_active "$PREV"
-				echo "proxy-switch: failed to start $ACTIVE, restored $PREV" >&2
-				exit 1
-			fi
-			log "could not restore $PREV either"
+
+	if [ "$NO_START" -eq 1 ]; then
+		log "$ACTIVE enabled; start deferred to its own boot script"
+	elif [ "$ENSURE" -eq 1 ] && running "$ACTIVE"; then
+		log "$ACTIVE already running; keeping it"
+	else
+		if [ "$ENSURE" -eq 1 ]; then
+			start_cmd=start
+		else
+			start_cmd=restart
 		fi
-		[ "$KEEP" -eq 1 ] || record_active off
-		echo "proxy-switch: failed to start $ACTIVE; direct routing left active" >&2
-		exit 1
+		if ! /etc/init.d/"$ACTIVE" "$start_cmd" >/dev/null 2>&1; then
+			log "failed to start $ACTIVE"
+			/etc/init.d/"$ACTIVE" stop >/dev/null 2>&1
+			cleanup_tables
+			if [ -n "$PREV" ] && [ "$PREV" != "off" ] && [ "$PREV" != "$ACTIVE" ] && svc_installed "$PREV"; then
+				log "restoring previous frontend $PREV"
+				set_enabled "$PREV" 1
+				/etc/init.d/"$PREV" enable >/dev/null 2>&1
+				if /etc/init.d/"$PREV" restart >/dev/null 2>&1; then
+					[ "$KEEP_RECORD" -eq 1 ] || record_active "$PREV"
+					echo "proxy-switch: failed to start $ACTIVE, restored $PREV" >&2
+					exit 1
+				fi
+				log "could not restore $PREV either"
+			fi
+			[ "$KEEP_RECORD" -eq 1 ] || record_active off
+			echo "proxy-switch: failed to start $ACTIVE; direct routing left active" >&2
+			exit 1
+		fi
 	fi
 fi
 
-if [ "$KEEP" -eq 0 ]; then
+if [ "$KEEP_RECORD" -eq 0 ]; then
 	record_active "$ACTIVE"
 fi
 

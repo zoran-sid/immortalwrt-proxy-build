@@ -91,7 +91,7 @@ baseline_ok() {
 
 active_proxy() { uci -q get proxy-guard.main.active 2>/dev/null; }
 
-stop_proxy() { /usr/sbin/proxy-switch off --keep-record >/dev/null 2>&1; }
+stop_proxy() { /usr/sbin/proxy-switch off --keep-record --keep-enabled >/dev/null 2>&1; }
 
 trap 'log "watchdog stopping"; exit 0' TERM INT
 

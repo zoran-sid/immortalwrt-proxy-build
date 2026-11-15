@@ -1,6 +1,9 @@
 luci-app-nlbwmon
+luci-i18n-nlbwmon-zh-cn
 luci-app-vnstat2
+luci-i18n-vnstat2-zh-cn
 luci-app-statistics
+luci-i18n-statistics-zh-cn
 collectd
 collectd-mod-cpu
 collectd-mod-memory

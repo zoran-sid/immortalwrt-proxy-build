@@ -1,2 +1,4 @@
 luci-app-upnp
+luci-i18n-upnp-zh-cn
 luci-app-natmap
+luci-i18n-natmap-zh-cn

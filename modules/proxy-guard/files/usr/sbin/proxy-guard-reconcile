@@ -1,0 +1,142 @@
+#!/bin/sh
+# proxy-guard-reconcile [--boot|--event]
+#
+# Reconcile the user's saved proxy choice with the actual enable/start state.
+#
+# Why this exists: HomeProxy's LuCI "enabled" switch writes
+# homeproxy.config.enabled=1 and restarts the service, but it does not create
+# /etc/rc.d/S99homeproxy. After a fail-open (which used to clear both the flag
+# and the link) or after enabling through the plugin UI, a reboot therefore
+# left HomeProxy "inactive" even though the UCI node configuration was intact.
+#
+# Rules:
+#   * UCI enabled flag (or a persisted fail-open record) expresses the choice.
+#   * Only one frontend is activated; the recorded active one wins.
+#   * HomeProxy is never started without a configured node / server, so an
+#     empty install does not spin a useless sing-box.
+#   * --boot only starts the service if its rc.d link is missing (otherwise
+#     the normal S99 boot script owns startup, avoiding a double start).
+#   * --event (WAN up) is fully idempotent: it starts only if not running.
+set -u
+
+MODE="${1:---event}"
+SVCS="passwall homeproxy nikki openclash"
+
+log() { logger -t proxy-guard "$*"; }
+
+svc_installed() { [ -x "/etc/init.d/$1" ]; }
+
+uci_enabled_key() {
+	case "$1" in
+		passwall)  echo 'passwall.@global[0].enabled' ;;
+		homeproxy) echo 'homeproxy.config.enabled' ;;
+		nikki)     echo 'nikki.@nikki[0].enabled' ;;
+		openclash) echo 'openclash.config.enable' ;;
+		*)         echo '' ;;
+	esac
+}
+
+uci_enabled() {
+	key="$(uci_enabled_key "$1")"
+	[ -n "$key" ] || return 1
+	[ "$(uci -q get "$key" 2>/dev/null)" = "1" ]
+}
+
+homeproxy_configured() {
+	node="$(uci -q get homeproxy.config.main_node 2>/dev/null)"
+	[ -n "$node" ] && [ "$node" != "nil" ] && return 0
+	[ "$(uci -q get homeproxy.server.enabled 2>/dev/null)" = "1" ] && return 0
+	[ "$(uci -q get homeproxy.config.routing_mode 2>/dev/null)" = "custom" ] && \
+		[ "$(uci -q get homeproxy.routing.default_outbound 2>/dev/null)" != "nil" ] && return 0
+	return 1
+}
+
+frontend_configured() {
+	case "$1" in
+		homeproxy) homeproxy_configured ;;
+		passwall)
+			node="$(uci -q get passwall.@global[0].tcp_node 2>/dev/null)"
+			[ -n "$node" ] && [ "$node" != "nil" ]
+			;;
+		*) return 0 ;;
+	esac
+}
+
+ensure_dirs() {
+	case "$1" in
+		homeproxy)
+			mkdir -p /var/run/homeproxy 2>/dev/null || true
+			chmod 755 /var/run/homeproxy 2>/dev/null || true
+			chown sing-box:sing-box /var/run/homeproxy 2>/dev/null || true
+			;;
+		passwall)  mkdir -p /var/run/passwall 2>/dev/null || true ;;
+		openclash) mkdir -p /var/run/openclash 2>/dev/null || true ;;
+		nikki)     mkdir -p /var/run/nikki 2>/dev/null || true ;;
+	esac
+}
+
+STATE="$(uci -q get proxy-guard.main.state 2>/dev/null)"
+ACTIVE="$(uci -q get proxy-guard.main.active 2>/dev/null)"
+TARGET=""
+ENABLED=""
+CONFIGURED_ENABLED=""
+
+for s in $SVCS; do
+	svc_installed "$s" || continue
+	uci_enabled "$s" || continue
+	ENABLED="$ENABLED $s"
+	frontend_configured "$s" && CONFIGURED_ENABLED="$CONFIGURED_ENABLED $s"
+done
+ENABLED="${ENABLED# }"
+CONFIGURED_ENABLED="${CONFIGURED_ENABLED# }"
+
+# A persisted fail-open record still means "the user chose this frontend".
+case "$ACTIVE" in
+	passwall|homeproxy|nikki|openclash)
+		if [ "$STATE" = "failopen" ]; then
+			TARGET="$ACTIVE"
+		fi
+		;;
+esac
+
+if [ -z "$TARGET" ]; then
+	# shellcheck disable=SC2086  # deliberate word splitting of the list
+	set -- $ENABLED
+	[ "$#" -eq 1 ] && TARGET="$1"
+fi
+
+# Several frontends enabled (e.g. plugin UI leaves PassWall on while the user
+# enables HomeProxy): prefer the one that is actually configured.
+if [ -z "$TARGET" ]; then
+	# shellcheck disable=SC2086  # deliberate word splitting of the list
+	set -- $CONFIGURED_ENABLED
+	[ "$#" -eq 1 ] && TARGET="$1"
+fi
+
+if [ -z "$TARGET" ]; then
+	for s in $ENABLED; do
+		[ "$s" = "$ACTIVE" ] && TARGET="$ACTIVE"
+	done
+fi
+
+[ -n "$TARGET" ] || exit 0
+
+if [ "$TARGET" = "homeproxy" ] && ! homeproxy_configured; then
+	log "homeproxy is enabled but has no node/server configured; not starting"
+	exit 0
+fi
+
+ensure_dirs "$TARGET"
+
+if [ "$MODE" = "--boot" ] && /etc/init.d/"$TARGET" enabled >/dev/null 2>&1; then
+	# The rc.d link already exists, so the normal S99 init script will start
+	# the service later in this boot. Still enforce mutual exclusion (disable
+	# other frontends/links) without starting the target twice.
+	/usr/sbin/proxy-switch --ensure --no-start "$TARGET" >/dev/null 2>&1 || true
+	exit 0
+fi
+
+log "reconciling proxy frontend '$TARGET' (mode=$MODE)"
+/usr/sbin/proxy-switch --ensure "$TARGET" >/dev/null 2>&1 || \
+	log "failed to reconcile $TARGET"
+exit 0

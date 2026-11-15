@@ -1,5 +1,9 @@
 luci-app-samba4
+luci-i18n-samba4-zh-cn
 luci-app-diskman
+luci-i18n-diskman-zh-cn
 luci-app-openlist
+luci-i18n-openlist-zh-cn
 luci-app-hd-idle
+luci-i18n-hd-idle-zh-cn
 block-mount
