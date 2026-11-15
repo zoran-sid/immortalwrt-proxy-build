@@ -32,6 +32,15 @@ class ConsoleProtocolTests(unittest.TestCase):
         self.assertEqual(con.command("one")[0], "FIRST")
         self.assertEqual(con.command("two")[0], "SECOND")
 
+    def test_unterminated_echo_chunk_is_not_an_end_marker(self):
+        con = object.__new__(Console)
+        con.clear = lambda: None
+        con.send = lambda *args, **kwargs: None
+        reads = iter([b"echo wraps\n@@E:00000001",
+                      b"\\n'\r\n@@B:00000001\r\n@@OK\r\n@@E:00000001\r\n"])
+        con.read = lambda timeout: next(reads)
+        self.assertEqual(con.command("fixture")[0], "OK")
+
     @unittest.skipUnless(os.environ.get("TEST_SH") or shutil.which("sh"), "Shell required")
     def test_unterminated_output_cannot_swallow_the_end_marker(self):
         con = object.__new__(Console)

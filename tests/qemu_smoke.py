@@ -135,8 +135,8 @@ class Console:
         # exit code echo it into their own output instead.
         wrapped = (
             "( %s ) >/tmp/.smk.out 2>&1; "
-            "printf '%s\\n'; sed 's/^/@@/' /tmp/.smk.out; "
-            "printf '\\n%s\\n'\r" % (cmd, begin, end)
+            "printf '@@B:%%08x\\n' %d; sed 's/^/@@/' /tmp/.smk.out; "
+            "printf '\\n@@E:%%08x\\n' %d\r" % (cmd, self.command_seq, self.command_seq)
         )
         self.send(wrapped, slow=True)
         deadline = time.time() + timeout
@@ -144,7 +144,11 @@ class Console:
         while time.time() < deadline:
             raw += self.read(1)
             text = raw.decode("utf-8", "replace")
-            if end in text.splitlines():
+            # A recv chunk can stop in the middle of the echoed command. Only
+            # complete lines can be protocol markers; the echo's partial last
+            # line must never complete an earlier request.
+            complete_lines = [line.rstrip("\r") for line in text.split("\n")[:-1]]
+            if end in complete_lines:
                 break
         else:
             raise TimeoutError("command timeout: %s" % cmd)
