@@ -1,0 +1,19 @@
+#!/bin/sh
+# Bounded boot-only retries. Do not accelerate watchdog probes or recovery.
+attempt=0
+while [ "$attempt" -lt 24 ]; do
+	sleep 5
+	[ "$(uci -q get homeproxy.config.enabled 2>/dev/null)" = "1" ] || exit 0
+	# Fail-open recovery is owned by the watchdog, including its backoff.
+	[ "$(uci -q get proxy-guard.main.state 2>/dev/null)" != "failopen" ] || exit 0
+	pgrep -f '[s]ing-box[[:space:]]+run[[:space:]].*sing-box-[cs]\.json' >/dev/null 2>&1 && exit 0
+	# Do not interrupt S99/homeproxy while it is still generating config and
+	# rules. The core is submitted to procd only after that work finishes.
+	if pgrep -f '[/]etc/(init[.]d/homeproxy|rc[.]d/S[0-9]+homeproxy)[[:space:]]+(boot|start|restart|reload)([[:space:]]|$)' >/dev/null 2>&1; then
+		attempt=$((attempt + 1))
+		continue
+	fi
+	/usr/sbin/proxy-guard-reconcile --event
+	attempt=$((attempt + 1))
+done
+logger -t proxy-guard "HomeProxy boot retry window ended; periodic watchdog will continue"

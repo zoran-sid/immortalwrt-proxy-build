@@ -49,7 +49,7 @@ class ResolverTests(unittest.TestCase):
         self.assertIn("does not apply", res.stderr)
 
     def test_pending_upstream_target_cannot_build(self):
-        res = run("check", "--target", "brume3", "--preset", "rescue")
+        res = run("check", "--target", "brume3", "--preset", "standard")
         self.assertEqual(res.returncode, 2)
         self.assertIn("pending-upstream", res.stderr)
 
@@ -97,7 +97,7 @@ class ResolverTests(unittest.TestCase):
 
     def test_standard_preset_contains_expected_proxy_default(self):
         self.assertEqual(plan("x86-64", "standard")["proxy_default"], "passwall")
-        self.assertEqual(plan("gl-mt2500", "lite")["proxy_default"], "homeproxy")
+        self.assertEqual(plan("gl-mt2500", "standard")["proxy_default"], "homeproxy")
 
     def test_tag_matrix_covers_devices(self):
         res = run("matrix", "--event", "tag")
@@ -107,11 +107,10 @@ class ResolverTests(unittest.TestCase):
         for expected in [
             ("x86-64", "standard"),
             ("x86-64", "full"),
-            ("x86-64", "rescue"),
             ("x86-64-vm", "standard"),
-            ("gl-mt2500", "lite"),
-            ("gl-mt2500-airoha", "lite"),
-            ("nanopi-r5s", "lite"),
+            ("gl-mt2500", "standard"),
+            ("gl-mt2500-airoha", "standard"),
+            ("nanopi-r5s", "standard"),
             ("nanopi-r6s", "standard"),
             ("nanopi-r76s", "standard"),
         ]:
@@ -119,7 +118,14 @@ class ResolverTests(unittest.TestCase):
         self.assertNotIn("brume3", {t for t, _ in pairs})
         self.assertNotIn(("x86-64-vm", "full"), pairs)
         self.assertEqual({p for t, p in pairs if t == "x86-64-vm"}, {"standard"})
-        self.assertIn(("nanopi-r6s", "rescue"), pairs)
+        self.assertEqual({p for _, p in pairs}, {"standard", "full"})
+        self.assertEqual(len(pairs), 8)
+
+    def test_retired_presets_are_rejected(self):
+        for preset in ("rescue", "lite"):
+            res = run("check", "--target", "x86-64", "--preset", preset)
+            self.assertEqual(res.returncode, 2)
+            self.assertIn("unknown preset", res.stderr)
 
 
 if __name__ == "__main__":

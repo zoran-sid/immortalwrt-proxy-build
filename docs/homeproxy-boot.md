@@ -1,5 +1,10 @@
 # HomeProxy 重启后不自启：根因与修复
 
+> 2026-11-15 补充：用户真机日志确认还有生成器与 sing-box 1.14.4 的配置
+> 兼容问题，旧测试没有覆盖。请先看
+> [配置兼容修复与不刷机安装](homeproxy-singbox14.md)。下文记录的是此前的
+> 启用状态/启动时序问题；此前状态机通过不能证明真实代理能够启动。
+
 日期：2026-11-15
 适用：ImmortalWrt 25.12.2、模块化构建（x86 / ARM / VM）、HomeProxy + proxy-guard
 
@@ -100,8 +105,9 @@ HomeProxy 的 `stop_service()` / `reload_service()` 在 `start_service()` 创建
    再生成配置并启动 sing-box；服务未运行时没有 stop 阶段的日志问题。
 5. **上游实现是否一致？**是。25.12.2 feed 的 `luci-app-homeproxy` 就是上述脚本；
    2026-11-15 核对 x86_64 / aarch64_cortex-a53 / aarch64_generic 三个架构。
-6. **是否版本兼容问题？**不是 OpenWrt 版本不兼容，而是上游 init 的初始化顺序 +
-   本仓库 fail-open 清 enable 状态的组合问题。
+6. **是否版本兼容问题？**这些 stop/目录提示本身不能说明配置是否兼容。
+   后续用户真实日志确认，旧生成器与 sing-box 1.14.4 确实存在配置兼容问题，
+   见文首补充；不能根据 stop 提示排除版本问题。
 
 ## 3. 修复
 

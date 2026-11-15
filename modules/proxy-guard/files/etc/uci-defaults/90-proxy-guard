@@ -7,12 +7,33 @@
 config_load proxy-guard
 config_get def main default passwall
 
+# Do this even on an upgrade with an already completed wizard.
+[ -x /etc/init.d/proxy-guard ] && /etc/init.d/proxy-guard enable >/dev/null 2>&1
+
 if [ "$(uci -q get wizard.main.done 2>/dev/null)" = "1" ]; then
 	exit 0
 fi
 
+# A kept /etc/config on sysupgrade may predate the wizard. Its saved choice
+# must win over the preset, including an explicit 'off'.
+case "$(uci -q get proxy-guard.main.active 2>/dev/null)" in
+	passwall|homeproxy|nikki|openclash|off) exit 0 ;;
+esac
+if [ "$(uci -q get homeproxy.config.enabled 2>/dev/null)" = "1" ]; then
+	exit 0
+fi
+node="$(uci -q get 'passwall.@global[0].tcp_node' 2>/dev/null)"
+if [ "$(uci -q get 'passwall.@global[0].enabled' 2>/dev/null)" = 1 ] && \
+	[ -n "$node" ] && [ "$node" != nil ]; then
+	exit 0
+fi
+if [ "$(uci -q get openclash.config.enable 2>/dev/null)" = 1 ] || \
+	[ "$(uci -q get 'nikki.@nikki[0].enabled' 2>/dev/null)" = 1 ]; then
+	exit 0
+fi
+
 logger -t proxy-guard "first boot: enabling default proxy '$def'"
-/usr/sbin/proxy-switch "$def" >/dev/null 2>&1
+/usr/sbin/proxy-switch --ensure --no-start "$def" >/dev/null 2>&1
 
 # The guard is the boot-time supervisor for the saved frontend choice; make
 # sure its rc.d link exists even if the image was built without it.

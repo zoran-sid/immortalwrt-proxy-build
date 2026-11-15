@@ -161,11 +161,11 @@ class EnvContractTests(unittest.TestCase):
         self.assertEqual(env["PRESET_KIND"], "preset")
         self.assertEqual(env["PRESET_NAME"], "standard")
 
-    def test_rescue_env_allows_empty_proxy(self):
-        env = build_env("x86-64", "rescue")
+    def test_custom_base_env_allows_empty_proxy(self):
+        env = build_env("x86-64", "custom", "base")
         for key in REQUIRED_ENV:
             self.assertIn(key, env)
-        # rescue has no proxy frontend; empty is valid but the key must exist.
+        # A custom base-only image has no proxy; the key must still exist.
         self.assertEqual(env["PRESET_PROXY"], "")
 
     def test_custom_env_reports_custom_kind(self):

@@ -360,16 +360,13 @@ def matrix(event, target, preset, modules_arg):
             kind = spec.get("kind", "baremetal")
             chosen = []
             if kind == "vm":
-                # a VM image only needs the recommended preset; rescue is pointless
                 chosen.append("standard")
             elif kind == "arm":
-                chosen.append("lite" if "lite" in applicable else "standard")
-                chosen.append("rescue")
+                chosen.append("standard")
             else:
                 for candidate in ("standard", "full"):
                     if candidate in applicable:
                         chosen.append(candidate)
-                chosen.append("rescue")
             for preset_name in chosen:
                 rows.append({"target": name, "preset": preset_name, "modules": ""})
     return {"include": rows}

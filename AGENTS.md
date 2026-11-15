@@ -3,7 +3,9 @@
 给后续接手的 agent（Codex / Claude Code / 其他）。读完这份就能继续干活，
 不需要重新探索仓库，也不要重新踩已经踩过的坑。
 
-最后更新：2026-11-14。这一版是「模块 + 预设 + 多目标」重构后的状态。
+最后更新：2026-11-15。当前预设仅 standard/full/custom，标签矩阵 8 个构建。
+启动修复、构建内置兼容补丁和本次验证范围见 `docs/firmware-boot.md`。
+下方旧 run 记录属于历史版本；不能据此宣称新固件验证通过。
 
 ---
 
@@ -50,7 +52,7 @@ gh run list --workflow=build-firmware --limit 10
 gh run watch <run-id>
 XDG_CACHE_HOME=/tmp/ghcache gh run view <run-id> --log-failed
 
-# 全矩阵发版（14 个构建）
+# 全矩阵发版（8 个构建）
 git tag v25.12.2 && git push origin v25.12.2
 
 # 本地解析/校验（不需要构建）
@@ -66,7 +68,7 @@ python3 tests/qemu_smoke.py --image firmware.img --log smoke.log
 python3 tests/qemu_runtime.py --image standard.img --log runtime.log
 
 # 本地构建（Linux；需要 zstd qemu-utils genisoimage python3-yaml）
-TARGET_NAME=gl-mt2500 PRESET=lite bash scripts/build.sh
+TARGET_NAME=gl-mt2500 PRESET=standard bash scripts/build.sh
 ```
 
 macOS 不能构建（ImageBuilder 是 Linux 二进制）。本机无 Docker daemon 时不要尝试本地绕路。

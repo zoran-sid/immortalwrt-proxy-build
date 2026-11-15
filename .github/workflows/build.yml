@@ -22,7 +22,7 @@ on:
       preset:
         description: "Preset (custom uses the modules input)"
         type: choice
-        options: [standard, full, lite, rescue, custom]
+        options: [standard, full, custom]
         default: standard
       modules:
         description: "Only for preset=custom, comma separated (e.g. base,nat,proxy-homeproxy)"
@@ -106,6 +106,22 @@ jobs:
           cat dist/BUILDINFO-*.txt
       - name: Verify artifact integrity
         run: python3 tests/verify_artifacts.py dist
+      - name: Boot and reboot checks (x86 VM standard)
+        if: matrix.target == 'x86-64-vm' && matrix.preset == 'standard'
+        timeout-minutes: 20
+        run: |
+          sudo apt-get install -y --no-install-recommends qemu-system-x86
+          image=$(find dist/images -maxdepth 1 -name '*squashfs-combined.img.gz' -print -quit)
+          test -n "$image"
+          gzip -dc "$image" > /tmp/firmware-boot.img
+          python3 tests/qemu_firmware_boot.py --image /tmp/firmware-boot.img --log qemu-firmware-boot.log
+      - name: Upload boot diagnostics
+        if: always() && matrix.target == 'x86-64-vm' && matrix.preset == 'standard'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: boot-diagnostics-${{ matrix.target }}-${{ matrix.preset }}
+          path: qemu-firmware-boot.log*
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: firmware-${{ needs.plan.outputs.version }}-${{ matrix.target }}-${{ matrix.preset }}

@@ -2,7 +2,7 @@
 # Build one ImmortalWrt image from a target + preset (or an explicit module list).
 #
 #   TARGET_NAME=x86-64 PRESET=standard bash scripts/build.sh
-#   TARGET_NAME=gl-mt2500 PRESET=lite     bash scripts/build.sh
+#   TARGET_NAME=gl-mt2500 PRESET=standard bash scripts/build.sh
 #   TARGET_NAME=x86-64 PRESET=custom MODULES=base,nat,proxy-homeproxy bash scripts/build.sh
 #
 # Output: dist/images/* plus dist/SHA256SUMS-<ver>-<target>-<preset>.txt and
@@ -102,6 +102,23 @@ if [[ -n "${PRESET_PROXY:-}" && -f "$OVERLAY/etc/config/proxy-guard" ]]; then
   log "default proxy for this target: $PRESET_PROXY"
 fi
 
+log "baking verified runtime compatibility into the firmware overlay"
+python3 "$REPO_ROOT/scripts/prepare_compat.py" --plan "$PLAN_ENV.json" \
+  --overlay "$OVERLAY" --cache "$WORKDIR/homeproxy-sources" --version "$VERSION"
+
+# These overlay-only init scripts have no apk postinst of their own. Bake
+# their links so they participate in rcS's initial boot enumeration.
+mkdir -p "$OVERLAY/etc/rc.d"
+for service in service-boot proxy-guard; do
+  init="$OVERLAY/etc/init.d/$service"
+  [[ -f "$init" ]] || continue
+  start="$(sed -n 's/^START=//p' "$init")"
+  stop="$(sed -n 's/^STOP=//p' "$init")"
+  [[ "$start" =~ ^[0-9]+$ && "$stop" =~ ^[0-9]+$ ]] || die "invalid init ordering for $service"
+  ln -sf "../init.d/$service" "$OVERLAY/etc/rc.d/S${start}${service}"
+  ln -sf "../init.d/$service" "$OVERLAY/etc/rc.d/K${stop}${service}"
+done
+
 log "building image"
 cd "$IB_DIR"
 make_args=(image "PROFILE=$PROFILE" "PACKAGES=$PKGS" "ROOTFS_PARTSIZE=$ROOTFS_PARTSIZE")
@@ -153,8 +170,9 @@ elif [[ -n "$ROOTFS_DIR" && -f "$ROOTFS_DIR/usr/lib/opkg/status" ]]; then
   awk -F': ' '/^Package:/{p=$2} /^Version:/{if (p!="") {print p " - " $2; p=""}}' \
     "$ROOTFS_DIR/usr/lib/opkg/status" | sort > "$MANIFEST_OUT"
 else
-  echo "WARN: no package manifest could be produced" >&2
+  die "no installed-package manifest could be produced"
 fi
+python3 "$REPO_ROOT/scripts/prepare_compat.py" --check-manifest "$MANIFEST_OUT"
 
 log "writing metadata"
 META="${VERSION}-${TARGET_NAME}-${PRESET_NAME}"

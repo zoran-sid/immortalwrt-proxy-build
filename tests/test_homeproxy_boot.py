@@ -49,7 +49,7 @@ class BootReconcileTests(unittest.TestCase):
         text = read("modules", "proxy-guard", "files", "etc", "hotplug.d",
                     "iface", "99-proxy-guard")
         self.assertIn('ifup', text)
-        self.assertIn("*wan*", text)
+        self.assertNotIn("*wan*", text)
         self.assertIn("--event", text)
         # No fixed sleeps as a readiness workaround.
         self.assertNotIn("sleep", text)

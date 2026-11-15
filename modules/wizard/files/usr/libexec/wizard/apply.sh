@@ -156,7 +156,7 @@ if [ "$TAILSCALE" = "1" ] && [ -x /etc/init.d/tailscale ]; then
 fi
 
 if [ "$DDNS" = "1" ] && [ -x /etc/init.d/ddns-go ]; then
-	uci -q set ddns-go.config.enable='1' 2>/dev/null || true
+	uci -q set ddns-go.config.enabled='1' 2>/dev/null || true
 	uci -q commit ddns-go 2>/dev/null || true
 	/etc/init.d/ddns-go enable >/dev/null 2>&1 || true
 	/etc/init.d/ddns-go restart >/dev/null 2>&1 || true

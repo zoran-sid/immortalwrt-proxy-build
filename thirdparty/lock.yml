@@ -1,7 +1,23 @@
-# 第三方包白名单。只有这里的条目可以进镜像。
+# 固定外部来源。只有这里的条目可以进镜像。
 #
 # 选择规则：最新的非 pre-release、发布满 14 天、没有未关闭的严重回归 issue，
-# 且必须提供与 25.12 ABI 匹配的 apk（25.12 起包管理器是 apk，ipk 不能装）。
+# apk 必须匹配 25.12 ABI；source 类型只用于官方包的固定源码兼容补丁。
+
+homeproxy-sources:
+  type: source
+  license: GPL-2.0-only
+  homepage: https://github.com/immortalwrt/luci
+  package: luci-app-homeproxy
+  package_version: 26.298.29275~c84adb9
+  sing_box_version: 1.14.4
+  release: 25.12.2
+  files:
+    generator:
+      url: https://raw.githubusercontent.com/immortalwrt/luci/c84adb9/applications/luci-app-homeproxy/root/etc/homeproxy/scripts/generate_client.uc
+      sha256: 7545f12f2af648ab09c64bea943257ed5c768f8689d910d3beb9aed15b069812
+    init:
+      url: https://raw.githubusercontent.com/immortalwrt/luci/c84adb9/applications/luci-app-homeproxy/root/etc/init.d/homeproxy
+      sha256: 47e624476a7a409209496de47cd64f73fed7dc86698cf6d6ec2b286c25c88340
 # 每个 arch 都记录来源 URL 与 sha256；构建时逐个校验，不匹配直接失败。
 
 nikki:

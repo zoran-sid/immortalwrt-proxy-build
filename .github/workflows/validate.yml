@@ -27,11 +27,8 @@ jobs:
         run: |
           set -e
           while IFS= read -r f; do
-            case "$f" in
-              */etc/init.d/*) continue ;;
-              *) sh -n "$f" && echo "ok $f" ;;
-            esac
-          done < <(find modules -type f \( -name '*.sh' -o -path '*/uci-defaults/*' -o -path '*/usr/sbin/*' \))
+            sh -n "$f" && echo "ok $f"
+          done < <(find modules -type f \( -name '*.sh' -o -path '*/uci-defaults/*' -o -path '*/usr/sbin/*' -o -path '*/etc/init.d/*' -o -path '*/hotplug.d/*' \))
       - name: YAML and JSON parse
         run: |
           python3 - <<'PY'
@@ -56,6 +53,12 @@ jobs:
           PY
       - name: Resolver and build-plan tests
         run: python3 -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Verify and prepare pinned HomeProxy sources
+        run: |
+          mkdir -p .work
+          python3 scripts/resolve.py build --target x86-64-vm --preset standard --format env --out .work/compat.env --overlay .work/compat-overlay
+          python3 scripts/prepare_compat.py --plan .work/compat.env.json --overlay .work/compat-overlay --cache .work/compat-sources
+          sh -n .work/compat-overlay/etc/init.d/homeproxy
       - name: Resolve every ready target
         run: |
           set -e
@@ -71,11 +74,6 @@ jobs:
               r = subprocess.run([sys.executable, 'scripts/resolve.py', 'check',
                                   '--target', t, '--preset', 'standard'],
                                  capture_output=True, text=True)
-              if r.returncode != 0:
-                  # standard may legitimately not apply (lite-only devices)
-                  r = subprocess.run([sys.executable, 'scripts/resolve.py', 'check',
-                                      '--target', t, '--preset', 'lite'],
-                                     capture_output=True, text=True)
               print(r.stdout.strip() or r.stderr.strip())
               bad |= r.returncode != 0
           sys.exit(bad)
@@ -95,7 +93,8 @@ jobs:
           lock = yaml.safe_load(open('thirdparty/lock.yml'))
           bad = 0
           for name, entry in (lock or {}).items():
-              for arch, spec in (entry.get('arches') or {}).items():
+              sources = entry.get('files') if entry.get('type') == 'source' else entry.get('arches')
+              for arch, spec in (sources or {}).items():
                   url = spec['url']
                   req = urllib.request.Request(url, headers=UA)
                   try:

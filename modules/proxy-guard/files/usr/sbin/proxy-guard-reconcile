@@ -43,11 +43,14 @@ uci_enabled() {
 }
 
 homeproxy_configured() {
-	node="$(uci -q get homeproxy.config.main_node 2>/dev/null)"
-	[ -n "$node" ] && [ "$node" != "nil" ] && return 0
 	[ "$(uci -q get homeproxy.server.enabled 2>/dev/null)" = "1" ] && return 0
-	[ "$(uci -q get homeproxy.config.routing_mode 2>/dev/null)" = "custom" ] && \
-		[ "$(uci -q get homeproxy.routing.default_outbound 2>/dev/null)" != "nil" ] && return 0
+	if [ "$(uci -q get homeproxy.config.routing_mode 2>/dev/null)" = "custom" ]; then
+		outbound="$(uci -q get homeproxy.routing.default_outbound 2>/dev/null)"
+		[ -n "$outbound" ] && [ "$outbound" != "nil" ] && return 0
+	else
+		node="$(uci -q get homeproxy.config.main_node 2>/dev/null)"
+		[ -n "$node" ] && [ "$node" != "nil" ] && return 0
+	fi
 	return 1
 }
 
@@ -77,6 +80,9 @@ ensure_dirs() {
 
 STATE="$(uci -q get proxy-guard.main.state 2>/dev/null)"
 ACTIVE="$(uci -q get proxy-guard.main.active 2>/dev/null)"
+# Runtime events must respect the watchdog's recovery backoff. A reboot is
+# a fresh start; retry the saved choice rather than resuming a stale timer.
+[ "$STATE" = "failopen" ] && [ "$MODE" != "--boot" ] && exit 0
 TARGET=""
 ENABLED=""
 CONFIGURED_ENABLED=""
@@ -127,6 +133,11 @@ if [ "$TARGET" = "homeproxy" ] && ! homeproxy_configured; then
 fi
 
 ensure_dirs "$TARGET"
+
+if [ "$MODE" = "--boot" ] && [ "$STATE" = "failopen" ]; then
+	uci -q set proxy-guard.main.state=normal
+	uci -q commit proxy-guard
+fi
 
 if [ "$MODE" = "--boot" ] && /etc/init.d/"$TARGET" enabled >/dev/null 2>&1; then
 	# The rc.d link already exists, so the normal S99 init script will start
