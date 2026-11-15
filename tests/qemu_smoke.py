@@ -133,7 +133,7 @@ class Console:
         wrapped = (
             "( %s ) >/tmp/.smk.out 2>&1; "
             "printf '@@B\\n'; sed 's/^/@@/' /tmp/.smk.out; "
-            "printf '@@E\\n'\r" % cmd
+            "printf '\\n@@E\\n'\r" % cmd
         )
         self.send(wrapped, slow=True)
         deadline = time.time() + timeout

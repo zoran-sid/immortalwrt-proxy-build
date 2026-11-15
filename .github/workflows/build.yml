@@ -43,7 +43,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-${{ github.ref }}-${{ inputs.target || 'matrix' }}-${{ inputs.preset || '' }}
+  group: build-${{ github.ref }}-${{ inputs.target || 'matrix' }}-${{ inputs.preset || '' }}-${{ inputs.verify_run_id || 'image' }}
   cancel-in-progress: false
 
 jobs:
