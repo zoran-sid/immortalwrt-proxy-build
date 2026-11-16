@@ -196,6 +196,18 @@ esac
         self.assertTrue(self.exists("homeproxy.running"))
         self.assertFalse(self.exists("passwall.running"))
 
+    def test_ui_disabling_last_frontend_stops_it_and_records_off(self):
+        for active in ("homeproxy", "passwall"):
+            self.put("proxy-guard.main.active", active)
+            self.put("homeproxy.config.enabled", "0")
+            self.put("passwall.@global[0].enabled", "0")
+            self.put(active + ".running")
+            self.put(active + ".link")
+            self.run_script("proxy-guard-reconcile", "--event")
+            self.assertFalse(self.exists(active + ".running"))
+            self.assertFalse(self.exists(active + ".link"))
+            self.assertEqual((self.root / "state/proxy-guard.main.active").read_text(), "off")
+
     def test_homeproxy_core_does_not_count_as_running_passwall(self):
         self.put("homeproxy.running")
         self.put("homeproxy.link")

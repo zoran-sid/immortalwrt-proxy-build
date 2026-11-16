@@ -100,6 +100,17 @@ done
 ENABLED="${ENABLED# }"
 CONFIGURED_ENABLED="${CONFIGURED_ENABLED# }"
 
+# Turning off the final application flag is an explicit off request, not an
+# absent selection to ignore. Stop its runtime and clear the stale record.
+if [ -z "$ENABLED" ] && [ "$STATE" != "failopen" ]; then
+	case "$ACTIVE" in
+		passwall|homeproxy|nikki|openclash)
+			/usr/sbin/proxy-switch off >/dev/null 2>&1 || log "failed to stop disabled frontends"
+			;;
+	esac
+	exit 0
+fi
+
 # A normal switch leaves all other frontend flags off. During runtime, a
 # newly enabled configured frontend expresses a new UI choice. Honor that
 # choice rather than overwriting it with the previous active record.
