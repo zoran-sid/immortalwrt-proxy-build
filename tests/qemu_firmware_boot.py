@@ -21,6 +21,17 @@ def check(console, name, command, marker):
     print("PASS " + name, flush=True)
 
 
+def wait_check(console, name, command, marker):
+    output = ""
+    for _ in range(40):
+        output = sh(console, command)
+        if marker in output:
+            print("PASS " + name, flush=True)
+            return
+        time.sleep(2)
+    raise AssertionError(name + ": " + output[-1500:])
+
+
 def wait_ready(console):
     # The serial login shell is available before rcS finishes first-boot UCI
     # defaults. Wait for procd's completion event before testing saved values.
@@ -96,8 +107,8 @@ def main():
         check(con, "enabled DDNS startup link recovered", "/etc/init.d/ddns-go enabled && echo DDNS_ENABLED", "DDNS_ENABLED")
         check(con, "DDNS process after reboot", "pgrep -f '[d]dns-go.*config.yaml' && echo DDNS_RUNNING", "DDNS_RUNNING")
         sh(con, "uci set homeproxy.routing.default_outbound=nil; uci commit homeproxy; ubus send config.change '{\"package\":\"homeproxy\"}'; sleep 15")
-        check(con, "HomeProxy UI master off records off", "uci -q get proxy-guard.main.active", "off")
-        check(con, "HomeProxy UI master off stops core", "pgrep -f '[s]ing-box[[:space:]]+run[[:space:]].*sing-box-c.json' >/dev/null || echo STOPPED", "STOPPED")
+        wait_check(con, "HomeProxy UI master off records off", "uci -q get proxy-guard.main.active", "off")
+        wait_check(con, "HomeProxy UI master off stops core", "pgrep -f '[s]ing-box[[:space:]]+run[[:space:]].*sing-box-c.json' >/dev/null || echo STOPPED", "STOPPED")
         sh(con, "uci set homeproxy.routing.default_outbound=test_a; uci commit homeproxy; ubus send config.change '{\"package\":\"homeproxy\"}'; sleep 15")
         # Exercise the current PassWall schema and both UI directions, then
         # reboot with PassWall selected. No external proxy traffic is asserted.
@@ -110,20 +121,22 @@ def main():
         for value in pw:
             sh(con, "uci set " + shlex.quote(value))
         sh(con, "uci commit passwall; ubus send config.change '{\"package\":\"passwall\"}'; sleep 5")
-        check(con, "UI switch to modern PassWall", "uci -q get proxy-guard.main.active", "passwall")
-        check(con, "PassWall core starts", "sleep 10; pgrep -f '[/]tmp/etc/passwall/bin/xray[[:space:]]' && echo XRAY_RUNNING", "XRAY_RUNNING")
+        wait_check(con, "UI switch to modern PassWall", "uci -q get proxy-guard.main.active", "passwall")
+        wait_check(con, "PassWall core starts", "pgrep -f '[/]tmp/etc/passwall/bin/xray[[:space:]]' && echo XRAY_RUNNING", "XRAY_RUNNING")
         sh(con, "uci set homeproxy.routing.default_outbound=test_a; uci commit homeproxy; ubus send config.change '{\"package\":\"homeproxy\"}'; sleep 15")
-        check(con, "UI switch back to HomeProxy", "uci -q get proxy-guard.main.active", "homeproxy")
-        check(con, "HomeProxy core after reverse switch", "sleep 5; pgrep -f '[s]ing-box[[:space:]]+run[[:space:]].*sing-box-c.json' && echo CORE_RUNNING", "CORE_RUNNING")
+        wait_check(con, "UI switch back to HomeProxy", "uci -q get proxy-guard.main.active", "homeproxy")
+        wait_check(con, "HomeProxy core after reverse switch", "pgrep -f '[s]ing-box[[:space:]]+run[[:space:]].*sing-box-c.json' && echo CORE_RUNNING", "CORE_RUNNING")
         sh(con, "uci set 'passwall.@global[0].enabled=1'; uci commit passwall; ubus send config.change '{\"package\":\"passwall\"}'; sleep 5")
+        wait_check(con, "PassWall choice settled before shutdown", "uci -q get proxy-guard.main.active", "passwall")
+        wait_check(con, "PassWall core settled before shutdown", "pgrep -f '[/]tmp/etc/passwall/bin/xray[[:space:]]' && echo XRAY_RUNNING", "XRAY_RUNNING")
         vm.poweroff()
         con = vm.start()
         wait_ready(con)
         check(con, "PassWall selection after reboot", "uci -q get proxy-guard.main.active", "passwall")
-        check(con, "PassWall core returns after reboot", "sleep 10; pgrep -f '[/]tmp/etc/passwall/bin/xray[[:space:]]' && echo XRAY_RUNNING", "XRAY_RUNNING")
+        wait_check(con, "PassWall core returns after reboot", "pgrep -f '[/]tmp/etc/passwall/bin/xray[[:space:]]' && echo XRAY_RUNNING", "XRAY_RUNNING")
         sh(con, "uci set 'passwall.@global[0].enabled=0'; uci commit passwall; ubus send config.change '{\"package\":\"passwall\"}'; sleep 15")
-        check(con, "PassWall UI master off records off", "uci -q get proxy-guard.main.active", "off")
-        check(con, "PassWall UI master off stops core", "pgrep -f '[/]tmp/etc/passwall/bin/xray[[:space:]]' >/dev/null || echo STOPPED", "STOPPED")
+        wait_check(con, "PassWall UI master off records off", "uci -q get proxy-guard.main.active", "off")
+        wait_check(con, "PassWall UI master off stops core", "pgrep -f '[/]tmp/etc/passwall/bin/xray[[:space:]]' >/dev/null || echo STOPPED", "STOPPED")
         if delay_error:
             raise delay_error
         print("All firmware boot checks passed (no external proxy traffic asserted).", flush=True)
