@@ -64,8 +64,13 @@ def main():
             delay_error = error
             print("FAIL " + str(error), flush=True)
             print(sh(con, "ls /etc/uci-defaults; uci -q get wizard.main.done; find /rom/etc/uci-defaults -maxdepth 1 -iname '*passwall*' -print -exec cat '{}' ';'"), flush=True)
+        # CLI UCI staging is globally visible. Pause coordination while building
+        # a multi-command fixture, then test real apply events with it running.
+        sh(con, "mv /etc/hotplug.d/iface/99-proxy-guard /tmp/99-proxy-guard.fixture; /etc/init.d/proxy-guard stop")
+        wait_check(con, "fixture coordination idle", "test ! -d /var/lock/proxy-switch.lock && echo IDLE", "IDLE")
+        check(con, "fixture starts with no selected runtime", "/usr/sbin/proxy-switch off && echo OFF_READY", "OFF_READY")
         assignments = [
-            "homeproxy.config.routing_mode=custom", "homeproxy.config.enabled=1",
+            "homeproxy.config.routing_mode=custom", "homeproxy.config.enabled=0",
             "homeproxy.routing=homeproxy", "homeproxy.routing.default_outbound=test_a",
             "homeproxy.routing.default_outbound_dns=default-dns",
             "homeproxy.dns=homeproxy", "homeproxy.dns.default_server=default-dns",
@@ -94,8 +99,9 @@ def main():
                       'if(seen[o.tag]) ok=false; seen[o.tag]=true; } '
                       'print(ok ? "UNIQUE_TAGS" : "DUPLICATE_TAGS");')
         check(con, "shared real node has unique outbound tags", "ucode -lfs -e " + shlex.quote(expression), "UNIQUE_TAGS")
-        sh(con, "/usr/sbin/proxy-switch homeproxy")
-        check(con, "HomeProxy core starts", "sleep 5; pgrep -f '[s]ing-box[[:space:]]+run[[:space:]].*sing-box-c.json' && echo CORE_RUNNING", "CORE_RUNNING")
+        check(con, "initial HomeProxy activation", "/usr/sbin/proxy-switch homeproxy && echo SWITCH_OK", "SWITCH_OK")
+        wait_check(con, "HomeProxy core starts", "pgrep -f '[s]ing-box[[:space:]]+run[[:space:]].*sing-box-c.json' && echo CORE_RUNNING", "CORE_RUNNING")
+        sh(con, "mv /tmp/99-proxy-guard.fixture /etc/hotplug.d/iface/99-proxy-guard; /etc/init.d/proxy-guard start")
         # Simulate a plugin UI saving enabled=1 without creating a startup link.
         sh(con, "/etc/init.d/service-boot stop")
         sh(con, "uci set ddns-go.config.enabled=1; uci commit ddns-go; /etc/init.d/ddns-go disable")
@@ -140,6 +146,17 @@ def main():
         if delay_error:
             raise delay_error
         print("All firmware boot checks passed (no external proxy traffic asserted).", flush=True)
+    except Exception:
+        for command in ("uci -q get proxy-guard.main.active",
+                        "pgrep -af 'xray|sing-box|proxy-guard'",
+                        "tail -n 35 /var/run/homeproxy/homeproxy.log",
+                        "tail -n 35 /tmp/log/passwall.log",
+                        "logread -e proxy-guard | tail -n 35"):
+            try:
+                print("DIAGNOSTIC " + command + "\n" + sh(con, command, timeout=15), flush=True)
+            except Exception as error:
+                print("DIAGNOSTIC unavailable: " + str(error), flush=True)
+        raise
     finally:
         vm.close()
 
