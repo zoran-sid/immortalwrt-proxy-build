@@ -3,7 +3,7 @@
 set -eu
 [ "$(id -u)" = 0 ] || { echo 'Run as root' >&2; exit 1; }
 for cmd in curl sha256sum; do command -v "$cmd" >/dev/null; done
-REV=4f50c01c033d03c30bf8811ca13b97706a89e630
+REV=6b516730734c86a1fe48f1a2df573cf747f919dd
 BASE="https://raw.githubusercontent.com/zoran-sid/immortalwrt-proxy-build/$REV/modules/proxy-guard/files"
 WORK=$(mktemp -d /tmp/proxy-ui-fix.XXXXXX)
 INSTALLED=0
@@ -25,7 +25,7 @@ curl -fSL --connect-timeout 15 --max-time 120 "$BASE/etc/init.d/proxy-guard" -o 
 curl -fSL --connect-timeout 15 --max-time 120 "$BASE/usr/sbin/proxy-switch" -o "$WORK/switch"
 printf '%s  %s\n' b941aa066f3473c7e74fafcaf2d6b54883ce69bcdde14ab72c81df0ebdc8ac86 "$WORK/reconcile" | sha256sum -c -
 printf '%s  %s\n' 7bfec03318ab526e28a23df03808732a992d374efd2326eb4bb4bf3f598b2328 "$WORK/init" | sha256sum -c -
-printf '%s  %s\n' ffb38e4aa39f9a1be9c7863e1cdd015d50752f9a686a87eb24c5bdfb3ece66f2 "$WORK/switch" | sha256sum -c -
+printf '%s  %s\n' 9df9512d32745612375525901be4c96708dac275244aa5be57c24c5b5b806768 "$WORK/switch" | sha256sum -c -
 sh -n "$WORK/reconcile"
 sh -n "$WORK/init"
 sh -n "$WORK/switch"
