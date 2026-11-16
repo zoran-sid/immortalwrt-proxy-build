@@ -6,9 +6,11 @@
 最后更新：2026-11-16。当前预设仅 standard/full/custom，标签矩阵 8 个构建。
 启动修复、构建内置兼容补丁和本次验证范围见 `docs/firmware-boot.md`。
 下方旧 run 记录属于历史版本；不能据此宣称新固件验证通过。
-本轮回归 95 项（CI 94 通过、外部核心检查 1 项跳过，已在本机补测）。
-最终 VM standard run 43738023389：构建、产物校验、QEMU 启动及关机重启检查全部通过；
-最终 GL-MT2500 standard run 43739322776：构建及产物校验通过。未验证真实代理数据面或 ARM 真机。
+当前回归 104 项（CI 103 通过、外部核心检查 1 项跳过，已在本机补测）。
+当前 VM standard：构建 43876862535、完整原生生命周期复测 43883625087 全部通过，
+包含实际 sing-box/Xray、双向页面事件、两边关闭和各自冷启动；下载 verified-firmware artifact。
+此前 VM 43738023389、GL-MT2500 43739322776 不包含本轮原生启停修正，属于历史产物。
+未验证真实代理数据面或 ARM 真机。
 
 ---
 
@@ -193,6 +195,12 @@ custom 构建的 preset 是 `custom-<sha256(排序模块列表)[:8]>`。
     `zz-passwall-boot` 中后执行，89 前缀会因配置尚不存在而跳过。
 26. 串口帧使用逐命令编号，由 shell printf 格式化生成，解析只接受完整行；避免回显分包
     被误判为结束标记。末尾标记前强制换行，兼容 ucode print 等不带换行的输出。
+
+27. PassWall 26.10.29 原生字段是 @global[0].node，不能只读取已被上游删除的 tcp_node。
+    HomeProxy 原生客户端页面不写 config.enabled，通过 main_node/default_outbound 的 nil
+    控制启停；该私有开关须由 HomeProxy 自身配置应用事件同步，不能当成原生 UI 字段。
+28. LuCI 配置通知是 ubus call service event，payload 为 type=config.change、data.package。
+    ubus send config.change 不会触发相同的 procd 服务动作，不可用它冒充真实界面测试。
 
 ## 8. 改动指南
 
