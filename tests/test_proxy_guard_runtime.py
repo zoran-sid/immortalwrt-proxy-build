@@ -37,7 +37,8 @@ class GuardRuntimeTests(unittest.TestCase):
 [ "$1" = -q ] && shift
 case "$1" in
 get) cat "$TEST_ROOT/state/$2" 2>/dev/null ;;
-set) key=${2%%=*}; printf '%s' "${2#*=}" > "$TEST_ROOT/state/$key" ;;
+set) key=${2%%=*}; test ! -f "$TEST_ROOT/state/$key.write-fails" || exit 1
+ printf '%s' "${2#*=}" > "$TEST_ROOT/state/$key" ;;
 commit) echo commit >> "$TEST_ROOT/commits" ;;
 esac
 ''')
@@ -115,6 +116,18 @@ esac
         self.assertTrue(self.exists("homeproxy.running"))
         self.assertFalse((self.root / "starts").exists())
         self.assertFalse((self.root / "commits").exists())
+
+    def test_failed_enable_write_does_not_stop_working_frontend_or_record_success(self):
+        self.put("homeproxy.config.enabled", "0")
+        self.put("homeproxy.config.enabled.write-fails")
+        self.put("passwall.running")
+        self.put("proxy-guard.main.active", "passwall")
+        result = self.run_script("proxy-switch", "homeproxy")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cannot save homeproxy enabled state", result.stderr)
+        self.assertTrue(self.exists("passwall.running"))
+        self.assertFalse(self.exists("homeproxy.running"))
+        self.assertEqual((self.root / "state/proxy-guard.main.active").read_text(), "passwall")
 
     def test_failed_start_can_retry_after_network_recovers(self):
         self.put("homeproxy.fail")

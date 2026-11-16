@@ -44,6 +44,8 @@ def main():
         wait_ready(con)
         check(con, "baked generator", "grep -q 'unique tags per routing node' /etc/homeproxy/scripts/generate_client.uc && echo BAKED", "BAKED")
         check(con, "maintenance startup link", "/etc/init.d/service-boot enabled && echo ENABLED", "ENABLED")
+        check(con, "fresh default frontend has its application enabled",
+              "uci -q get 'passwall.@global[0].enabled'", "1")
         delay_error = None
         try:
             check(con, "PassWall five-second default", "uci -q get 'passwall.@global_delay[0].start_delay'", "5")

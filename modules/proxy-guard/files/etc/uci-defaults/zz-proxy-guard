@@ -1,5 +1,6 @@
 #!/bin/sh
 # 首次启动：按预设只启用一个代理前端。向导完成后不再干预。
+# Run after luci-app-* creates frontend configurations, and zz-passwall-boot.
 [ -x /usr/sbin/proxy-switch ] || exit 0
 [ -f /etc/config/proxy-guard ] || exit 0
 
@@ -33,7 +34,10 @@ if [ "$(uci -q get openclash.config.enable 2>/dev/null)" = 1 ] || \
 fi
 
 logger -t proxy-guard "first boot: enabling default proxy '$def'"
-/usr/sbin/proxy-switch --ensure --no-start "$def" >/dev/null 2>&1
+if ! /usr/sbin/proxy-switch --ensure --no-start "$def" >/dev/null 2>&1; then
+	logger -t proxy-guard "default proxy setup failed; retaining first-boot script for retry"
+	exit 1
+fi
 
 # The guard is the boot-time supervisor for the saved frontend choice; make
 # sure its rc.d link exists even if the image was built without it.
