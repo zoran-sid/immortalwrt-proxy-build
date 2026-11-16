@@ -4,6 +4,15 @@ START=95
 STOP=10
 USE_PROCD=1
 
+service_triggers() {
+	procd_open_trigger
+	local package
+	for package in homeproxy passwall nikki openclash; do
+		procd_add_config_trigger "config.change" "$package" /usr/sbin/proxy-guard-reconcile --event
+	done
+	procd_close_trigger
+}
+
 start_service() {
 	if [ -x /usr/sbin/homeproxy-config-patch ]; then
 		/usr/sbin/homeproxy-config-patch || logger -t proxy-guard "HomeProxy config compatibility patch failed"

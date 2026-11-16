@@ -105,13 +105,13 @@ def main():
               "passwall.@global[0].node=boot_fixture", "passwall.@global[0].enabled=1"]
         for value in pw:
             sh(con, "uci set " + shlex.quote(value))
-        sh(con, "uci commit passwall; /usr/sbin/proxy-guard-reconcile --event")
+        sh(con, "uci commit passwall; ubus send config.change '{\"package\":\"passwall\"}'; sleep 5")
         check(con, "UI switch to modern PassWall", "uci -q get proxy-guard.main.active", "passwall")
         check(con, "PassWall core starts", "sleep 10; pgrep -f '[/]tmp/etc/passwall/bin/xray[[:space:]]' && echo XRAY_RUNNING", "XRAY_RUNNING")
-        sh(con, "uci set homeproxy.config.enabled=1; uci commit homeproxy; /usr/sbin/proxy-guard-reconcile --event")
+        sh(con, "uci set homeproxy.config.enabled=1; uci commit homeproxy; ubus send config.change '{\"package\":\"homeproxy\"}'; sleep 5")
         check(con, "UI switch back to HomeProxy", "uci -q get proxy-guard.main.active", "homeproxy")
         check(con, "HomeProxy core after reverse switch", "sleep 5; pgrep -f '[s]ing-box[[:space:]]+run[[:space:]].*sing-box-c.json' && echo CORE_RUNNING", "CORE_RUNNING")
-        sh(con, "uci set 'passwall.@global[0].enabled=1'; uci commit passwall; /usr/sbin/proxy-guard-reconcile --event")
+        sh(con, "uci set 'passwall.@global[0].enabled=1'; uci commit passwall; ubus send config.change '{\"package\":\"passwall\"}'; sleep 5")
         vm.poweroff()
         con = vm.start()
         wait_ready(con)
