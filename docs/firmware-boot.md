@@ -37,6 +37,10 @@ HomeProxy 源码及 SHA256，生成 FILES 覆盖层：
 旧逻辑会直接返回，现场确认会留下两个 enabled=0 但 Xray 仍运行的状态。
 原生配置变更事件会立即触发协调，不必等待 60 秒周期。设备现场已验证统一命令可
 启动 HomeProxy、重启恢复、切到实际 Xray，以及关闭所有核心；页面完整生命周期仍需验证。
+固定版本 HomeProxy 原生 client.js 没有 config.enabled 主开关，实际使用 main_node=nil
+或自定义 default_outbound=nil 关闭客户端。协调器现接收触发事件的包名，仅在 HomeProxy
+自身保存应用时按原生控制同步 enabled 镜像；切走时缓存出口选择并设原生控件为关闭，
+统一命令切回时恢复出口。节点和订阅 section 不删除。页面切回时可重新选择主节点或默认出口。
 
 - fail-open 只暂时停核心，不清 enabled 和启动链接。
 - 网络事件/周期收敛不会删除当前代理的活动规则。
