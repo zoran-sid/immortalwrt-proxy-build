@@ -58,7 +58,11 @@ frontend_configured() {
 	case "$1" in
 		homeproxy) homeproxy_configured ;;
 		passwall)
-			node="$(uci -q get passwall.@global[0].tcp_node 2>/dev/null)"
+			# New PassWall migrates tcp_node to node. An explicit disabled
+			# modern value must not fall back to a stale legacy selection.
+			if ! node="$(uci -q get 'passwall.@global[0].node' 2>/dev/null)"; then
+				node="$(uci -q get 'passwall.@global[0].tcp_node' 2>/dev/null)"
+			fi
 			[ -n "$node" ] && [ "$node" != "nil" ]
 			;;
 		*) return 0 ;;
@@ -80,6 +84,15 @@ ensure_dirs() {
 
 STATE="$(uci -q get proxy-guard.main.state 2>/dev/null)"
 ACTIVE="$(uci -q get proxy-guard.main.active 2>/dev/null)"
+# HomeProxy's native client UI controls main_node/default_outbound rather than
+# the coordinator's enabled mirror. Synchronize only on its own apply event.
+if [ "$MODE" = "--event" ] && [ "${2:-}" = homeproxy ]; then
+	HP_ENABLED=0
+	homeproxy_configured && HP_ENABLED=1
+	if [ "$(uci -q get homeproxy.config.enabled 2>/dev/null)" != "$HP_ENABLED" ]; then
+		uci -q set "homeproxy.config.enabled=$HP_ENABLED" && uci -q commit homeproxy || exit 1
+	fi
+fi
 # Runtime events must respect the watchdog's recovery backoff. A reboot is
 # a fresh start; retry the saved choice rather than resuming a stale timer.
 [ "$STATE" = "failopen" ] && [ "$MODE" != "--boot" ] && exit 0
@@ -95,6 +108,29 @@ for s in $SVCS; do
 done
 ENABLED="${ENABLED# }"
 CONFIGURED_ENABLED="${CONFIGURED_ENABLED# }"
+
+# Turning off the final application flag is an explicit off request, not an
+# absent selection to ignore. Stop its runtime and clear the stale record.
+if [ -z "$ENABLED" ] && [ "$STATE" != "failopen" ]; then
+	case "$ACTIVE" in
+		passwall|homeproxy|nikki|openclash)
+			/usr/sbin/proxy-switch off >/dev/null 2>&1 || log "failed to stop disabled frontends"
+			;;
+	esac
+	exit 0
+fi
+
+# A normal switch leaves all other frontend flags off. During runtime, a
+# newly enabled configured frontend expresses a new UI choice. Honor that
+# choice rather than overwriting it with the previous active record.
+if [ "$MODE" != "--boot" ] && [ "$STATE" != "failopen" ]; then
+	OTHER_CONFIGURED=""
+	for s in $CONFIGURED_ENABLED; do
+		[ "$s" = "$ACTIVE" ] || OTHER_CONFIGURED="$OTHER_CONFIGURED $s"
+	done
+	set -- $OTHER_CONFIGURED
+	[ "$#" -eq 1 ] && TARGET="$1"
+fi
 
 # A persisted fail-open record still means "the user chose this frontend".
 case "$ACTIVE" in

@@ -24,6 +24,25 @@ HomeProxy 源码及 SHA256，生成 FILES 覆盖层：
 
 ## 保留用户选择
 
+后续设备现场验证发现首次初始化脚本 `90-proxy-guard` 也早于上游创建配置文件。
+它已移到 `zz-proxy-guard`；目标启用值写入失败时，proxy-switch 现在返回错误，
+保留现有运行前端且不记录切换成功。初始化失败会保留默认脚本供下次重试。
+新 QEMU 检查同时要求默认 PassWall 的应用开关为 1，防止只检查 rc.d 链接而遗漏。
+此项为后续修正，前文所列已构建镜像尚不包含此项修正。
+现场又确认 PassWall 26.10.29 将 `tcp_node` 迁移为 `node`，上游初始化脚本明确删除
+旧字段。守护和默认选择现改为优先读取新字段，仅在新字段不存在时兼容旧字段。
+此前用旧字段空值判断“未选节点”是错误诊断。运行时仅有一个已配置的非当前前端被
+重新启用时，优先采用该页面新选择，切换后清除另一前端的启用状态，避免旧 active 覆盖。
+当所有应用开关均为 0 且不在 fail-open 恢复状态时，显式停止核心并记录 active=off；
+旧逻辑会直接返回，现场确认会留下两个 enabled=0 但 Xray 仍运行的状态。
+原生配置变更事件会立即触发协调，不必等待 60 秒周期。设备现场已验证统一命令可
+启动 HomeProxy、重启恢复、切到实际 Xray，以及关闭所有核心；当时页面完整生命周期尚未验证，
+本轮完整复测结果见下文。
+固定版本 HomeProxy 原生 client.js 没有 config.enabled 主开关，实际使用 main_node=nil
+或自定义 default_outbound=nil 关闭客户端。协调器现接收触发事件的包名，仅在 HomeProxy
+自身保存应用时按原生控制同步 enabled 镜像；切走时缓存出口选择并设原生控件为关闭，
+统一命令切回时恢复出口。节点和订阅 section 不删除。页面切回时可重新选择主节点或默认出口。
+
 - fail-open 只暂时停核心，不清 enabled 和启动链接。
 - 网络事件/周期收敛不会删除当前代理的活动规则。
 - PassWall 只识别核心进程，DNS 辅助进程不算核心启动成功；HomeProxy 只识别 run，
@@ -76,7 +95,9 @@ FRP、Docker、Samba、Tailscale 等由上游原生启动链接/procd 管理，�
 预置生成器、PassWall 延时、共享节点生成配置校验、HomeProxy 核心重启自启、
 DDNS-GO 缺失启动链接恢复及进程检查。
 
-最新回归 [43739095008](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43739095008)：
+### 上一轮历史验证（不含本轮原生启停修复）
+
+回归 [43739095008](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43739095008)：
 95 项，94 项通过，1 项需要外部核心路径而跳过；该项已在本机分别使用官方
 sing-box 1.12.25 与 1.14.4 补测通过。
 架构与包兼容预检查：GL-MT2500 standard
@@ -95,15 +116,33 @@ DDNS-GO 启用状态的启动链接恢复及进程启动。该任务因旧镜像
 镜像代码 `812ac30`，包含 `zz-passwall-boot` 顺序修正；构建及产物完整性检查通过。
 
 最终虚拟机固件：[43738023389](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43738023389)，
-镜像代码 `41b331c`，与后续提交的固件文件一致（后续仅修改测试、工作流和文档）。
+镜像代码 `41b331c`，不包含本轮原生页面启停修正。
 构建与 SHA256/BUILDINFO/manifest 校验通过，14 个镜像文件及 manifest 共 15 项校验。
 独立 QEMU 任务全部通过：首次初始化完成、预置生成器、维护启动链接、PassWall 五秒
 默认值、真实生成器及 sing-box 配置校验、共享节点出站标签唯一、HomeProxy 核心启动、
 关机再启动后的选择持久化与核心恢复、DDNS-GO 启动链接恢复和进程启动。
 固件下载见该运行的 `firmware-25.12.2-x86-64-vm-standard` artifact，保留 14 天。
 
+### 当前完整生命周期验证
+
+回归 [43883635106](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43883635106)：
+104 项，103 通过、1 项外部核心检查按条件跳过；本地守护回归 25 项通过。
+镜像构建 [43876862535](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43876862535)
+代码 `caffc66`，固件文件与当前分支一致；原运行的测试配置并发准备有误，不能将该运行
+标记为整体通过。已保存镜像由修正后的测试器复测：
+[43883625087](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43883625087) 全部通过。
+
+覆盖首次启用值、五秒默认延时、真实生成器/schema、重复节点标签、sing-box 启动和冷启动、
+DDNS 启动链接/进程、HomeProxy 原生关闭、原生配置事件切到实际 Xray、切回 sing-box、
+再次选择 PassWall 冷启动、PassWall 关闭后 active=off 且无核心。配置通知与实际 LuCI
+reload_config 一致，使用 service event RPC；分阶段等状态完成后再断电，避免固定延时误判。
+假节点仅用于配置、进程和路由生命周期，未断言远端代理流量或服务器模式。
+
+当前下载为复测运行中的 `verified-firmware-25.12.2-x86-64-vm-standard`，原始 SHA256、
+BUILDINFO、manifest 保留；不会把 QEMU 修改后的测试磁盘当固件上传。
+
 固件工作流支持 `verify_run_id` 复用同仓库已保存的 VM standard 镜像，独立重跑启动检查；
 成功后保存 `verified-firmware-*`，保留原始 BUILDINFO 和校验和。复测不会发布 Release。
 
-QEMU 使用本地虚拟 SOCKS 节点检查配置与进程，不代表真实代理数据面或 ARM
-真机验证。PassWall 本轮检查覆盖默认延时，未使用真实节点在 QEMU 中验证其代理数据面。
+QEMU 使用本地虚拟 SOCKS/VMess 节点检查配置与进程，不代表真实代理数据面或 ARM
+真机验证。真实订阅与节点仍需在设备上验证流量；Release 未由这些测试任务自动发布。

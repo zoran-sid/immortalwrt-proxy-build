@@ -51,11 +51,52 @@ uci_enabled_key() {
 }
 
 set_enabled() {
+	if [ "$1" = homeproxy ]; then
+		# Restore cached exits only on an actual enable transition. An ensure
+		# of an already enabled service must preserve native UI edits.
+		if [ "$2" = 1 ] && [ "$(uci -q get homeproxy.config.enabled 2>/dev/null)" = 1 ]; then
+			return 0
+		fi
+		# Match native LuCI controls while keeping selected exits available for
+		# a later explicit switch back. Never delete node/subscription sections.
+		hp_changed=0
+		for field in config.main_node routing.default_outbound server.enabled; do
+			value="$(uci -q get "homeproxy.$field" 2>/dev/null)"
+			saved="hp_saved_${field#*.}"
+			if [ "$2" = 0 ]; then
+				case "$field:$value" in
+					server.enabled:1) disabled=0 ;;
+					server.enabled:*) continue ;;
+					*:|*:nil) continue ;;
+					*) disabled=nil ;;
+				esac
+				uci -q set "proxy-guard.main.$saved=$value" || return 1
+				uci -q set "homeproxy.$field=$disabled" || return 1
+				hp_changed=1
+			else
+				case "$field:$value" in
+					server.enabled:1) continue ;;
+					server.enabled:*) ;;
+					*:|*:nil) ;;
+					*) continue ;;
+				esac
+				value="$(uci -q get "proxy-guard.main.$saved" 2>/dev/null)"
+				[ -n "$value" ] && [ "$value" != nil ] || continue
+				uci -q set "homeproxy.$field=$value" || return 1
+				hp_changed=1
+			fi
+		done
+		if [ "$hp_changed" = 1 ]; then
+			uci -q commit homeproxy && uci -q commit proxy-guard || return 1
+		fi
+	fi
 	key="$(uci_enabled_key "$1")"
 	[ -n "$key" ] || return 0
 	[ "$(uci -q get "$key" 2>/dev/null)" = "$2" ] && return 0
-	uci -q set "$key=$2" 2>/dev/null || true
-	uci -q commit "$1" 2>/dev/null || true
+	if ! uci -q set "$key=$2" 2>/dev/null || ! uci -q commit "$1" 2>/dev/null; then
+		log "could not persist $key=$2"
+		return 1
+	fi
 }
 
 record_active() {
@@ -134,6 +175,13 @@ PREV="$(uci -q get proxy-guard.main.active 2>/dev/null)"
 if [ "$ACTIVE" != "off" ] && ! svc_installed "$ACTIVE"; then
 	log "service $ACTIVE is not installed; nothing changed"
 	echo "proxy-switch: $ACTIVE is not installed" >&2
+	exit 1
+fi
+
+# Fail before stopping another frontend if the target configuration does not
+# exist yet, or its enabled flag cannot be saved. Never record false success.
+if [ "$ACTIVE" != "off" ] && ! set_enabled "$ACTIVE" 1; then
+	echo "proxy-switch: cannot save $ACTIVE enabled state; nothing stopped" >&2
 	exit 1
 fi
 

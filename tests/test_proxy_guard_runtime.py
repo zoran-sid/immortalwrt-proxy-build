@@ -37,7 +37,8 @@ class GuardRuntimeTests(unittest.TestCase):
 [ "$1" = -q ] && shift
 case "$1" in
 get) cat "$TEST_ROOT/state/$2" 2>/dev/null ;;
-set) key=${2%%=*}; printf '%s' "${2#*=}" > "$TEST_ROOT/state/$key" ;;
+set) key=${2%%=*}; test ! -f "$TEST_ROOT/state/$key.write-fails" || exit 1
+ printf '%s' "${2#*=}" > "$TEST_ROOT/state/$key" ;;
 commit) echo commit >> "$TEST_ROOT/commits" ;;
 esac
 ''')
@@ -116,6 +117,18 @@ esac
         self.assertFalse((self.root / "starts").exists())
         self.assertFalse((self.root / "commits").exists())
 
+    def test_failed_enable_write_does_not_stop_working_frontend_or_record_success(self):
+        self.put("homeproxy.config.enabled", "0")
+        self.put("homeproxy.config.enabled.write-fails")
+        self.put("passwall.running")
+        self.put("proxy-guard.main.active", "passwall")
+        result = self.run_script("proxy-switch", "homeproxy")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("cannot save homeproxy enabled state", result.stderr)
+        self.assertTrue(self.exists("passwall.running"))
+        self.assertFalse(self.exists("homeproxy.running"))
+        self.assertEqual((self.root / "state/proxy-guard.main.active").read_text(), "passwall")
+
     def test_failed_start_can_retry_after_network_recovers(self):
         self.put("homeproxy.fail")
         self.run_script("proxy-guard-reconcile", "--event")
@@ -153,6 +166,76 @@ esac
         self.put("homeproxy.routing.default_outbound", "nil")
         self.run_script("proxy-guard-reconcile", "--event")
         self.assertFalse((self.root / "starts").exists())
+
+    def test_ui_enabling_modern_passwall_replaces_old_homeproxy_choice(self):
+        self.put("homeproxy.running")
+        self.put("passwall.@global[0].enabled", "1")
+        self.put("passwall.@global[0].node", "modern-node")
+        self.run_script("proxy-guard-reconcile", "--event")
+        self.assertTrue(self.exists("passwall.running"))
+        self.assertFalse(self.exists("homeproxy.running"))
+        self.assertEqual((self.root / "state/proxy-guard.main.active").read_text(), "passwall")
+        self.run_script("proxy-guard-reconcile", "--event")
+        self.assertEqual((self.root / "starts").read_text().splitlines(), ["passwall start"])
+
+    def test_modern_disabled_passwall_does_not_use_stale_tcp_node(self):
+        self.put("passwall.@global[0].enabled", "1")
+        self.put("passwall.@global[0].node", "nil")
+        self.put("passwall.@global[0].tcp_node", "stale-node")
+        self.put("homeproxy.running")
+        self.run_script("proxy-guard-reconcile", "--event")
+        self.assertFalse(self.exists("passwall.running"))
+        self.assertTrue(self.exists("homeproxy.running"))
+
+    def test_ui_enabling_homeproxy_replaces_old_passwall_choice(self):
+        self.put("proxy-guard.main.active", "passwall")
+        self.put("passwall.@global[0].enabled", "1")
+        self.put("passwall.@global[0].node", "modern-node")
+        self.put("passwall.running")
+        self.run_script("proxy-guard-reconcile", "--event")
+        self.assertTrue(self.exists("homeproxy.running"))
+        self.assertFalse(self.exists("passwall.running"))
+
+    def test_ui_disabling_last_frontend_stops_it_and_records_off(self):
+        for active in ("homeproxy", "passwall"):
+            self.put("proxy-guard.main.active", active)
+            self.put("homeproxy.config.enabled", "0")
+            self.put("passwall.@global[0].enabled", "0")
+            self.put(active + ".running")
+            self.put(active + ".link")
+            self.run_script("proxy-guard-reconcile", "--event")
+            self.assertFalse(self.exists(active + ".running"))
+            self.assertFalse(self.exists(active + ".link"))
+            self.assertEqual((self.root / "state/proxy-guard.main.active").read_text(), "off")
+
+    def test_native_homeproxy_apply_enables_without_private_flag(self):
+        self.put("homeproxy.config.enabled", "0")
+        self.put("proxy-guard.main.active", "off")
+        self.run_script("proxy-guard-reconcile", "--event", "homeproxy")
+        self.assertTrue(self.exists("homeproxy.running"))
+        self.assertEqual((self.root / "state/homeproxy.config.enabled").read_text(), "1")
+
+    def test_native_homeproxy_disable_stops_and_clears_private_flag(self):
+        self.put("homeproxy.config.main_node", "nil")
+        self.put("homeproxy.running")
+        self.run_script("proxy-guard-reconcile", "--event", "homeproxy")
+        self.assertFalse(self.exists("homeproxy.running"))
+        self.assertEqual((self.root / "state/homeproxy.config.enabled").read_text(), "0")
+
+    def test_switch_away_preserves_native_exit_for_switch_back(self):
+        self.run_script("proxy-switch", "passwall")
+        self.assertEqual((self.root / "state/homeproxy.config.main_node").read_text(), "nil")
+        self.run_script("proxy-switch", "homeproxy")
+        self.assertEqual((self.root / "state/homeproxy.config.main_node").read_text(), "test-node")
+        self.assertTrue(self.exists("homeproxy.running"))
+
+    def test_ensure_does_not_restore_native_settings_edited_while_enabled(self):
+        self.put("homeproxy.server.enabled", "0")
+        self.put("proxy-guard.main.hp_saved_enabled", "1")
+        self.put("homeproxy.running")
+        self.run_script("proxy-switch", "--ensure", "homeproxy")
+        self.assertEqual((self.root / "state/homeproxy.server.enabled").read_text(), "0")
+        self.assertFalse((self.root / "commits").exists())
 
     def test_homeproxy_core_does_not_count_as_running_passwall(self):
         self.put("homeproxy.running")
