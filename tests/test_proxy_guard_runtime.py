@@ -167,6 +167,35 @@ esac
         self.run_script("proxy-guard-reconcile", "--event")
         self.assertFalse((self.root / "starts").exists())
 
+    def test_ui_enabling_modern_passwall_replaces_old_homeproxy_choice(self):
+        self.put("homeproxy.running")
+        self.put("passwall.@global[0].enabled", "1")
+        self.put("passwall.@global[0].node", "modern-node")
+        self.run_script("proxy-guard-reconcile", "--event")
+        self.assertTrue(self.exists("passwall.running"))
+        self.assertFalse(self.exists("homeproxy.running"))
+        self.assertEqual((self.root / "state/proxy-guard.main.active").read_text(), "passwall")
+        self.run_script("proxy-guard-reconcile", "--event")
+        self.assertEqual((self.root / "starts").read_text().splitlines(), ["passwall start"])
+
+    def test_modern_disabled_passwall_does_not_use_stale_tcp_node(self):
+        self.put("passwall.@global[0].enabled", "1")
+        self.put("passwall.@global[0].node", "nil")
+        self.put("passwall.@global[0].tcp_node", "stale-node")
+        self.put("homeproxy.running")
+        self.run_script("proxy-guard-reconcile", "--event")
+        self.assertFalse(self.exists("passwall.running"))
+        self.assertTrue(self.exists("homeproxy.running"))
+
+    def test_ui_enabling_homeproxy_replaces_old_passwall_choice(self):
+        self.put("proxy-guard.main.active", "passwall")
+        self.put("passwall.@global[0].enabled", "1")
+        self.put("passwall.@global[0].node", "modern-node")
+        self.put("passwall.running")
+        self.run_script("proxy-guard-reconcile", "--event")
+        self.assertTrue(self.exists("homeproxy.running"))
+        self.assertFalse(self.exists("passwall.running"))
+
     def test_homeproxy_core_does_not_count_as_running_passwall(self):
         self.put("homeproxy.running")
         self.put("homeproxy.link")

@@ -58,7 +58,11 @@ frontend_configured() {
 	case "$1" in
 		homeproxy) homeproxy_configured ;;
 		passwall)
-			node="$(uci -q get passwall.@global[0].tcp_node 2>/dev/null)"
+			# New PassWall migrates tcp_node to node. An explicit disabled
+			# modern value must not fall back to a stale legacy selection.
+			if ! node="$(uci -q get 'passwall.@global[0].node' 2>/dev/null)"; then
+				node="$(uci -q get 'passwall.@global[0].tcp_node' 2>/dev/null)"
+			fi
 			[ -n "$node" ] && [ "$node" != "nil" ]
 			;;
 		*) return 0 ;;
@@ -95,6 +99,18 @@ for s in $SVCS; do
 done
 ENABLED="${ENABLED# }"
 CONFIGURED_ENABLED="${CONFIGURED_ENABLED# }"
+
+# A normal switch leaves all other frontend flags off. During runtime, a
+# newly enabled configured frontend expresses a new UI choice. Honor that
+# choice rather than overwriting it with the previous active record.
+if [ "$MODE" != "--boot" ] && [ "$STATE" != "failopen" ]; then
+	OTHER_CONFIGURED=""
+	for s in $CONFIGURED_ENABLED; do
+		[ "$s" = "$ACTIVE" ] || OTHER_CONFIGURED="$OTHER_CONFIGURED $s"
+	done
+	set -- $OTHER_CONFIGURED
+	[ "$#" -eq 1 ] && TARGET="$1"
+fi
 
 # A persisted fail-open record still means "the user chose this frontend".
 case "$ACTIVE" in

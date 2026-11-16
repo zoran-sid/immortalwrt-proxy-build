@@ -95,6 +95,28 @@ def main():
         check(con, "HomeProxy core returns after reboot", "sleep 10; pgrep -f '[s]ing-box[[:space:]]+run[[:space:]].*sing-box-c.json' && echo CORE_RUNNING", "CORE_RUNNING")
         check(con, "enabled DDNS startup link recovered", "/etc/init.d/ddns-go enabled && echo DDNS_ENABLED", "DDNS_ENABLED")
         check(con, "DDNS process after reboot", "pgrep -f '[d]dns-go.*config.yaml' && echo DDNS_RUNNING", "DDNS_RUNNING")
+        # Exercise the current PassWall schema and both UI directions, then
+        # reboot with PassWall selected. No external proxy traffic is asserted.
+        pw = ["passwall.boot_fixture=nodes", "passwall.boot_fixture.type=Xray",
+              "passwall.boot_fixture.protocol=vmess", "passwall.boot_fixture.address=127.0.0.1",
+              "passwall.boot_fixture.port=1080", "passwall.boot_fixture.transport=tcp",
+              "passwall.boot_fixture.uuid=11111111-1111-4111-8111-111111111111",
+              "passwall.boot_fixture.security=auto", "passwall.boot_fixture.alter_id=0",
+              "passwall.@global[0].node=boot_fixture", "passwall.@global[0].enabled=1"]
+        for value in pw:
+            sh(con, "uci set " + shlex.quote(value))
+        sh(con, "uci commit passwall; /usr/sbin/proxy-guard-reconcile --event")
+        check(con, "UI switch to modern PassWall", "uci -q get proxy-guard.main.active", "passwall")
+        check(con, "PassWall core starts", "sleep 10; pgrep -f '[/]tmp/etc/passwall/bin/xray[[:space:]]' && echo XRAY_RUNNING", "XRAY_RUNNING")
+        sh(con, "uci set homeproxy.config.enabled=1; uci commit homeproxy; /usr/sbin/proxy-guard-reconcile --event")
+        check(con, "UI switch back to HomeProxy", "uci -q get proxy-guard.main.active", "homeproxy")
+        check(con, "HomeProxy core after reverse switch", "sleep 5; pgrep -f '[s]ing-box[[:space:]]+run[[:space:]].*sing-box-c.json' && echo CORE_RUNNING", "CORE_RUNNING")
+        sh(con, "uci set 'passwall.@global[0].enabled=1'; uci commit passwall; /usr/sbin/proxy-guard-reconcile --event")
+        vm.poweroff()
+        con = vm.start()
+        wait_ready(con)
+        check(con, "PassWall selection after reboot", "uci -q get proxy-guard.main.active", "passwall")
+        check(con, "PassWall core returns after reboot", "sleep 10; pgrep -f '[/]tmp/etc/passwall/bin/xray[[:space:]]' && echo XRAY_RUNNING", "XRAY_RUNNING")
         if delay_error:
             raise delay_error
         print("All firmware boot checks passed (no external proxy traffic asserted).", flush=True)
