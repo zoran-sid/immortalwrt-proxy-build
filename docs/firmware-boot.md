@@ -31,6 +31,8 @@ HomeProxy 源码及 SHA256，生成 FILES 覆盖层：
 - 自定义模式关闭默认出口时，忽略非自定义模式留下的 main_node。
 - 首启默认值不会覆盖升级保留下来的代理选择，即使没有完成过初始化向导。
 - PassWall 新装默认启动延时 5 秒；已有向导完成配置保留原延时。
+  初始化脚本放在 `zz-passwall-boot`，在上游 `luci-app-passwall` 创建默认配置后执行；
+  旧的 89 前缀会过早看到配置不存在而跳过，真实镜像检查已发现并修正此顺序问题。
 - HomeProxy 的独立开机 worker 每 5 秒补启动，最多两分钟；等待原生启动过程完成，
   核心运行即退出，用户关闭/fail-open 时退出。日常健康探测继续为 60 秒。
 
@@ -74,11 +76,34 @@ FRP、Docker、Samba、Tailscale 等由上游原生启动链接/procd 管理，�
 预置生成器、PassWall 延时、共享节点生成配置校验、HomeProxy 核心重启自启、
 DDNS-GO 缺失启动链接恢复及进程检查。
 
-最新回归 [43732539852](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43732539852)：
-91 项，90 项通过，1 项需要外部核心路径而跳过；该项已在本机分别使用官方
+最新回归 [43739095008](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43739095008)：
+95 项，94 项通过，1 项需要外部核心路径而跳过；该项已在本机分别使用官方
 sing-box 1.12.25 与 1.14.4 补测通过。
-GL-MT2500 standard [43732448316](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43732448316)
-构建及 SHA256/BUILDINFO/manifest 校验通过；未做 ARM 真机启动测试。
+架构与包兼容预检查：GL-MT2500 standard
+[43732448316](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43732448316)、x86-64 full
+[43732445629](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43732445629)
+构建及 SHA256/BUILDINFO/manifest 校验通过。这两次预检查早于 PassWall 初始化顺序修正，
+不能用来证明最终五秒默认值已生效；未做 ARM 真机启动测试。
+
+镜像预检 [43738427960](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43738427960)
+已确认真实生成器和核心配置校验、共享节点标签唯一、HomeProxy 核心启动及关机重启恢复、
+DDNS-GO 启用状态的启动链接恢复及进程启动。该任务因旧镜像的 PassWall 默认延时仍为
+60 秒而失败，不能标记为整体验证通过。
+
+最终 ARM 构建：GL-MT2500 standard
+[43739322776](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43739322776)，
+镜像代码 `812ac30`，包含 `zz-passwall-boot` 顺序修正；构建及产物完整性检查通过。
+
+最终虚拟机固件：[43738023389](https://github.com/zoran-sid/immortalwrt-proxy-build/actions/runs/43738023389)，
+镜像代码 `41b331c`，与后续提交的固件文件一致（后续仅修改测试、工作流和文档）。
+构建与 SHA256/BUILDINFO/manifest 校验通过，14 个镜像文件及 manifest 共 15 项校验。
+独立 QEMU 任务全部通过：首次初始化完成、预置生成器、维护启动链接、PassWall 五秒
+默认值、真实生成器及 sing-box 配置校验、共享节点出站标签唯一、HomeProxy 核心启动、
+关机再启动后的选择持久化与核心恢复、DDNS-GO 启动链接恢复和进程启动。
+固件下载见该运行的 `firmware-25.12.2-x86-64-vm-standard` artifact，保留 14 天。
+
+固件工作流支持 `verify_run_id` 复用同仓库已保存的 VM standard 镜像，独立重跑启动检查；
+成功后保存 `verified-firmware-*`，保留原始 BUILDINFO 和校验和。复测不会发布 Release。
 
 QEMU 使用本地虚拟 SOCKS 节点检查配置与进程，不代表真实代理数据面或 ARM
-真机验证。具体构建运行和结果在验证后补录；尚未验证的镜像不得宣称稳定可用。
+真机验证。PassWall 本轮检查覆盖默认延时，未使用真实节点在 QEMU 中验证其代理数据面。

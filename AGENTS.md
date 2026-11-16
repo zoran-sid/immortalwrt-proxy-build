@@ -3,9 +3,12 @@
 给后续接手的 agent（Codex / Claude Code / 其他）。读完这份就能继续干活，
 不需要重新探索仓库，也不要重新踩已经踩过的坑。
 
-最后更新：2026-11-15。当前预设仅 standard/full/custom，标签矩阵 8 个构建。
+最后更新：2026-11-16。当前预设仅 standard/full/custom，标签矩阵 8 个构建。
 启动修复、构建内置兼容补丁和本次验证范围见 `docs/firmware-boot.md`。
 下方旧 run 记录属于历史版本；不能据此宣称新固件验证通过。
+本轮回归 95 项（CI 94 通过、外部核心检查 1 项跳过，已在本机补测）。
+最终 VM standard run 43738023389：构建、产物校验、QEMU 启动及关机重启检查全部通过；
+最终 GL-MT2500 standard run 43739322776：构建及产物校验通过。未验证真实代理数据面或 ARM 真机。
 
 ---
 
@@ -186,6 +189,10 @@ custom 构建的 preset 是 `custom-<sha256(排序模块列表)[:8]>`。
 24. **新增**：LuCI 中文不是自动的。每个 `luci-app-*` 需要显式的
     `luci-i18n-*-zh-cn` 包；`tests/test_i18n.py` 会检查模块是否漏装。
     adguardhome/openclash 上游没有独立 zh-cn 包（OpenClash 自带中文）。
+25. PassWall 的配置由上游 `luci-app-passwall` 首次初始化脚本创建；五秒默认值必须放在
+    `zz-passwall-boot` 中后执行，89 前缀会因配置尚不存在而跳过。
+26. 串口帧使用逐命令编号，由 shell printf 格式化生成，解析只接受完整行；避免回显分包
+    被误判为结束标记。末尾标记前强制换行，兼容 ucode print 等不带换行的输出。
 
 ## 8. 改动指南
 
