@@ -9,13 +9,13 @@
 
 | 目标 | 架构 | target / subtarget | profile | 可用预设 | 状态 |
 |---|---|---|---|---|---|
-| x86-64 | x86_64 | x86/64 | generic | standard / full / rescue | ✅ 支持 |
+| x86-64 | x86_64 | x86/64 | generic | standard / full | ✅ 支持 |
 | x86-64-vm | x86_64 | x86/64 | generic | standard | ✅ 支持（PVE / ESXi / Hyper-V） |
-| GL-MT2500（MaxLinear PHY） | aarch64_cortex-a53 | mediatek/filogic | glinet_gl-mt2500 | lite / rescue | ✅ 支持 |
-| GL-MT2500（Airoha PHY） | aarch64_cortex-a53 | mediatek/filogic | glinet_gl-mt2500-airoha | lite / rescue | ✅ 支持 |
-| NanoPi R5S | aarch64_generic | rockchip/armv8 | friendlyarm_nanopi-r5s | lite / rescue | ✅ 支持 |
-| NanoPi R6S | aarch64_generic | rockchip/armv8 | friendlyarm_nanopi-r6s | standard / full / rescue | ✅ 支持 |
-| NanoPi R76S | aarch64_generic | rockchip/armv8 | friendlyarm_nanopi-r76s | standard / full / rescue | ✅ 支持 |
+| GL-MT2500（MaxLinear PHY） | aarch64_cortex-a53 | mediatek/filogic | glinet_gl-mt2500 | standard | ✅ 支持 |
+| GL-MT2500（Airoha PHY） | aarch64_cortex-a53 | mediatek/filogic | glinet_gl-mt2500-airoha | standard | ✅ 支持 |
+| NanoPi R5S | aarch64_generic | rockchip/armv8 | friendlyarm_nanopi-r5s | standard | ✅ 支持 |
+| NanoPi R6S | aarch64_generic | rockchip/armv8 | friendlyarm_nanopi-r6s | standard / full | ✅ 支持 |
+| NanoPi R76S | aarch64_generic | rockchip/armv8 | friendlyarm_nanopi-r76s | standard / full | ✅ 支持 |
 | GL-MT5000（Brume 3） | aarch64_cortex-a53 | mediatek/filogic | 未提供 | — | ⏳ 等待上游 |
 
 **关于 Brume 3**：MT7987A + RTL8366ub 的交换芯片驱动仍在上游，25.12.2 与 snapshot 的
@@ -31,11 +31,10 @@
 |---|---|---|---|---|
 | `standard` | 所有目标 | base, nat, PassWall + HomeProxy + guard, frp, nps, monitor-lite, AdGuardHome, vpn-mesh, remote-access, qos, notify, wizard | x86: PassWall / ARM: HomeProxy | 1024 MiB |
 | `full` | x86-64、x86-64-vm、R6S、R76S | standard + monitor-pro, nas, docker | 同上 | 2048 MiB |
-| `lite` | MT2500、MT2500-airoha、R5S | base, nat, HomeProxy + guard, frp, monitor-lite, vpn-mesh, wizard | HomeProxy | 1024 MiB |
-| `rescue` | 所有目标 | base（无任何代理前端） | 无 | 1024 MiB |
 
-`tag` 发版矩阵共 14 个构建：x86-64 × {standard, full, rescue}、x86-64-vm × {standard}、
-5 个 ARM 设备 × {lite 或 standard, rescue}。
+预设仅保留 `standard`、`full`，也可使用 `custom` 自选模块。
+`tag` 发版矩阵共 8 个构建：x86-64 × {standard, full}、x86-64-vm × {standard}、
+5 个 ARM 设备 × {standard}。旧 lite/rescue 不再构建。
 
 ## 模块
 
@@ -62,12 +61,18 @@
 | storage | `nas` | Samba4、diskman、OpenList、hd-idle | full |
 | container | `docker` | Docker + Dockerman | full |
 | notify | `notify` | 微信推送（掉线/上下线） | ✔ |
-| vm | `vm-guest` | qemu-guest-agent、open-vm-tools（仅 VM 目标，自动附加） | 自动 |
+| vm | `vm-guest` | qemu-guest-agent（仅 VM 目标，自动附加） | 自动 |
 | wizard | `wizard` | 首次登录向导（纯 LuCI JS + shell） | ✔ |
 
 代理前端可以同时**安装**，但同一时刻只允许一个**启用**：`proxy-guard` 在首启和
 `proxy-switch` 切换时停用其余前端并清理残留 nftables 表。`proxy-openclash` 保留为可选，
 不进入任何预设。
+
+固件构建会校验并预置 HomeProxy 的 sing-box 1.14 兼容生成器；多个路由策略
+可以直接选择同一个具体节点，出站标签互不冲突。PassWall 新装默认延时 5 秒；
+HomeProxy 开机阶段每 5 秒补启动，平时仍保留 60 秒故障探测。
+已核实启用字段的非代理插件会恢复缺失的自启动链接，不强制启动配置关闭的服务。
+详情与验证范围见 [固件启动修复](docs/firmware-boot.md)。
 
 > **Nikki 暂不可用**：ImageBuilder 25.12.2 的本地包索引带签名校验，第三方 apk
 > 重新索引后 apk 报 `UNTRUSTED signature` 并忽略（构建 run 43550558856 / 43550786477 /
@@ -88,13 +93,13 @@ Actions → `build-firmware` → Run workflow：
 
 ```bash
 # 单个目标
-gh workflow run build-firmware -f target=gl-mt2500 -f preset=lite
+gh workflow run build-firmware -f target=gl-mt2500 -f preset=standard
 
 # 自定义模块组合（文件名会带模块列表的短 hash）
 gh workflow run build-firmware -f target=x86-64 -f preset=custom \
   -f modules=base,nat,proxy-homeproxy,wizard
 
-# 正式发版：14 个目标/预设组合全出
+# 正式发版：8 个目标/预设组合全出
 git tag v25.12.2 && git push origin v25.12.2
 ```
 
@@ -111,7 +116,7 @@ macOS 上跑不了：ImageBuilder 是 Linux x86_64 二进制，且本地没有 D
 
 ```
 dist/images/immortalwrt-25.12.2-x86-64-standard-squashfs-combined-efi.img.gz
-dist/images/immortalwrt-25.12.2-gl-mt2500-lite-squashfs-sysupgrade.img.gz
+dist/images/immortalwrt-25.12.2-gl-mt2500-standard-squashfs-sysupgrade.bin
 dist/images/immortalwrt-25.12.2-x86-64-vm-standard-squashfs-combined-efi.qcow2
 dist/images/immortalwrt-<ver>-<target>-<preset>.manifest
 dist/SHA256SUMS-<ver>-<target>-<preset>.txt

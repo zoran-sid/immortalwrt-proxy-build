@@ -132,7 +132,15 @@ if [ "$state0" = "failopen" ]; then
 	fi
 fi
 
+# Leave the normal S99 boot scripts time to run before checking their cores.
+sleep "$INTERVAL"
 while :; do
+	# WAN events can arrive before DNS is usable, or while proxy-switch is
+	# locked. Retry desired state periodically, even if active is still empty
+	# (e.g. enable from the plugin UI). Fail-open recovery owns its own timer.
+	if [ "$mode" = "normal" ]; then
+		/usr/sbin/proxy-guard-reconcile --event >/dev/null 2>&1
+	fi
 	proxy="$(active_proxy)"
 	now="$(date +%s)"
 

@@ -53,11 +53,13 @@ uci_enabled_key() {
 set_enabled() {
 	key="$(uci_enabled_key "$1")"
 	[ -n "$key" ] || return 0
+	[ "$(uci -q get "$key" 2>/dev/null)" = "$2" ] && return 0
 	uci -q set "$key=$2" 2>/dev/null || true
 	uci -q commit "$1" 2>/dev/null || true
 }
 
 record_active() {
+	[ "$(uci -q get proxy-guard.main.active 2>/dev/null)" = "$1" ] && return 0
 	uci -q set "proxy-guard.main.active=$1" 2>/dev/null || true
 	uci -q commit proxy-guard 2>/dev/null || true
 }
@@ -67,10 +69,10 @@ running() {
 		# HomeProxy keeps a log-cleaner instance alive even when sing-box has
 		# exited, so a generic procd/pid check is a false positive here.
 		homeproxy)
-			pgrep -f '[s]ing-box.*sing-box-[cs]\.json' >/dev/null 2>&1
+			pgrep -f '[s]ing-box[[:space:]]+run[[:space:]].*sing-box-[cs]\.json' >/dev/null 2>&1
 			;;
 		passwall)
-			pgrep -f '[x]ray|[s]ing-box' >/dev/null 2>&1
+			pgrep -f '[/](tmp|var)/etc/passwall/bin/(xray|sing-box|ss-local|ss-redir|sslocal|ssr-local|ssr-redir|trojan|trojan-plus|hysteria|hysteria2|tuic-client|naive|naiveproxy|ipt2socks)([[:space:]]|$)' >/dev/null 2>&1
 			;;
 		openclash)
 			pgrep -f '[c]lash' >/dev/null 2>&1
@@ -102,6 +104,8 @@ ensure_runtime_dir() {
 
 cleanup_tables() {
 	for t in passwall homeproxy nikki openclash; do
+		# A running target owns these rules; --ensure must preserve them.
+		[ "$t" = "$ACTIVE" ] && continue
 		if nft list table inet "$t" >/dev/null 2>&1; then
 			if nft delete table inet "$t" 2>/dev/null; then
 				log "removed stale nft table inet $t"
@@ -137,30 +141,38 @@ for s in $SVCS; do
 	[ "$s" = "$ACTIVE" ] && continue
 	svc_installed "$s" || continue
 	log "disabling $s"
+	key="$(uci_enabled_key "$s")"
+	# Avoid stopping already-disabled plugins on every watchdog tick.
+	if [ "$(uci -q get "$key" 2>/dev/null)" = "1" ] || \
+		/etc/init.d/"$s" enabled >/dev/null 2>&1 || running "$s"; then
+		/etc/init.d/"$s" stop >/dev/null 2>&1
+	fi
 	[ "$KEEP_ENABLED" -eq 1 ] || set_enabled "$s" 0
-	/etc/init.d/"$s" stop >/dev/null 2>&1
 	[ "$KEEP_ENABLED" -eq 1 ] || /etc/init.d/"$s" disable >/dev/null 2>&1
 done
 
+# Clear partial runtime state before a retry. Preserve a running target on
+# --ensure, and leave boot startup to S99 when --no-start was requested.
+if [ "$ACTIVE" != "off" ] && [ "$NO_START" -eq 0 ]; then
+	if [ "$ENSURE" -eq 0 ] || ! running "$ACTIVE"; then
+		ensure_runtime_dir "$ACTIVE"
+		/etc/init.d/"$ACTIVE" stop >/dev/null 2>&1
+	fi
+fi
 cleanup_tables
 
 if [ "$ACTIVE" != "off" ]; then
 	ensure_runtime_dir "$ACTIVE"
 	log "enabling $ACTIVE"
 	set_enabled "$ACTIVE" 1
-	/etc/init.d/"$ACTIVE" enable >/dev/null 2>&1
+	/etc/init.d/"$ACTIVE" enabled >/dev/null 2>&1 || /etc/init.d/"$ACTIVE" enable >/dev/null 2>&1
 
 	if [ "$NO_START" -eq 1 ]; then
 		log "$ACTIVE enabled; start deferred to its own boot script"
 	elif [ "$ENSURE" -eq 1 ] && running "$ACTIVE"; then
 		log "$ACTIVE already running; keeping it"
 	else
-		if [ "$ENSURE" -eq 1 ]; then
-			start_cmd=start
-		else
-			start_cmd=restart
-		fi
-		if ! /etc/init.d/"$ACTIVE" "$start_cmd" >/dev/null 2>&1; then
+		if ! /etc/init.d/"$ACTIVE" start >/dev/null 2>&1; then
 			log "failed to start $ACTIVE"
 			/etc/init.d/"$ACTIVE" stop >/dev/null 2>&1
 			cleanup_tables
@@ -175,7 +187,8 @@ if [ "$ACTIVE" != "off" ]; then
 				fi
 				log "could not restore $PREV either"
 			fi
-			[ "$KEEP_RECORD" -eq 1 ] || record_active off
+			# Keep the choice so later reconciliation can retry a failed start.
+			[ "$KEEP_RECORD" -eq 1 ] || record_active "$ACTIVE"
 			echo "proxy-switch: failed to start $ACTIVE; direct routing left active" >&2
 			exit 1
 		fi

@@ -38,7 +38,7 @@ REQUIRED_BUILDINFO = [
     "git_commit",
     "built_at",
 ]
-# Legitimately empty for rescue builds.
+# Legitimately empty for a custom base-only build.
 MAY_BE_EMPTY = {"default_proxy", "thirdparty"}
 
 

@@ -1,0 +1,33 @@
+#!/bin/sh
+# Patch only the verified official 25.12.2 generator. Keep a rollback copy.
+set -eu
+F=/etc/homeproxy/scripts/generate_client.uc
+SNIPPET=/usr/share/homeproxy/compat-1.14.uc
+MARK='proxy-guard: migrate the 25.12.2 generator output'
+EXPECTED=7545f12f2af648ab09c64bea943257ed5c768f8689d910d3beb9aed15b069812
+[ -f "$F" ] || exit 0
+grep -q "$MARK" "$F" && exit 0
+[ -f "$SNIPPET" ] || exit 1
+got="$(sha256sum "$F" | awk '{print $1}')"
+if [ "$got" != "$EXPECTED" ]; then
+	logger -t homeproxy-compat "unknown generator hash $got; no changes made"
+	echo "homeproxy-compat: unsupported generator $got; no changes made" >&2
+	exit 1
+fi
+tmp="$F.compat.$$"
+trap 'rm -f "$tmp"' EXIT INT TERM
+awk -v snippet="$SNIPPET" '
+/^writefile\(RUN_DIR/ {
+    while ((getline line < snippet) > 0) print line
+    close(snippet)
+    count++
+}
+{ print }
+END { if (count != 1) exit 1 }
+' "$F" > "$tmp"
+# Compile only: do not execute the generator or read user nodes here.
+ucode -c -o /dev/null "$tmp"
+[ -f "$F.proxy-guard-original" ] || cp -p "$F" "$F.proxy-guard-original"
+chmod 755 "$tmp"
+mv -f "$tmp" "$F"
+logger -t homeproxy-compat "migrated legacy inbound/block/cache fields for sing-box 1.14"

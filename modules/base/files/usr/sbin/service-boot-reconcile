@@ -1,0 +1,31 @@
+#!/bin/sh
+# Repair a missing rc.d link only when the service's own configuration says
+# enabled. Existing links and processes remain owned by the upstream service.
+. /lib/functions.sh
+
+enabled_section() {
+	local enabled
+	config_get_bool enabled "$1" "$ENABLE_OPTION" 0
+	[ "$enabled" = 1 ] && WANT_ENABLED=1
+	return 0
+}
+
+while read -r service package selector ENABLE_OPTION; do
+	case "$service" in ''|'#'*) continue ;; esac
+	[ -x "/etc/init.d/$service" ] || continue
+	[ -f "/etc/config/$package" ] || continue
+	config_load "$package" || continue
+	WANT_ENABLED=0
+	case "$selector" in
+		@*) config_foreach enabled_section "${selector#@}" ;;
+		*) enabled_section "$selector" ;;
+	esac
+	[ "$WANT_ENABLED" = 1 ] || continue
+	/etc/init.d/"$service" enabled >/dev/null 2>&1 && continue
+	if /etc/init.d/"$service" enable; then
+		logger -t service-boot "restored autostart for enabled service $service"
+		# A link added after rcS enumerated S* will not run in this boot.
+		/etc/init.d/"$service" start || logger -t service-boot "$service start failed; inspect its own log"
+	fi
+done < /usr/share/service-boot/services.conf
+exit 0

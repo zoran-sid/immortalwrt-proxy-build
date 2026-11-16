@@ -22,7 +22,7 @@ on:
       preset:
         description: "Preset (custom uses the modules input)"
         type: choice
-        options: [standard, full, lite, rescue, custom]
+        options: [standard, full, custom]
         default: standard
       modules:
         description: "Only for preset=custom, comma separated (e.g. base,nat,proxy-homeproxy)"
@@ -32,6 +32,10 @@ on:
         description: "Publish a GitHub Release with the artifacts"
         type: boolean
         default: false
+      verify_run_id:
+        description: "Optional: only recheck x86-64-vm/standard from this build run"
+        required: false
+        default: ""
   push:
     tags: ["v*"]
 
@@ -39,7 +43,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: build-${{ github.ref }}-${{ inputs.target || 'matrix' }}-${{ inputs.preset || '' }}
+  group: build-${{ github.ref }}-${{ inputs.target || 'matrix' }}-${{ inputs.preset || '' }}-${{ inputs.verify_run_id || 'image' }}
   cancel-in-progress: false
 
 jobs:
@@ -59,8 +63,13 @@ jobs:
           PRESET_IN: ${{ inputs.preset }}
           MODULES_IN: ${{ inputs.modules }}
           VERSION_IN: ${{ inputs.version }}
+          VERIFY_RUN: ${{ inputs.verify_run_id }}
         run: |
           set -euo pipefail
+          if [ -n "$VERIFY_RUN" ] && { [ "$TARGET_IN" != x86-64-vm ] || [ "$PRESET_IN" != standard ]; }; then
+            echo 'Saved-image rechecks require target=x86-64-vm, preset=standard' >&2
+            exit 2
+          fi
           if [ "$EVENT" = "push" ]; then
             matrix="$(python3 scripts/resolve.py matrix --event tag)"
             version="${GITHUB_REF_NAME#v}"
@@ -75,6 +84,7 @@ jobs:
 
   build:
     needs: plan
+    if: inputs.verify_run_id == ''
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
@@ -113,15 +123,59 @@ jobs:
           retention-days: 14
           if-no-files-found: error
 
-  release:
+  boot:
+    name: Boot and reboot x86 VM standard
     needs: [plan, build]
-    if: github.event_name == 'push' || inputs.release
+    if: always() && needs.plan.result == 'success' && (needs.build.result == 'success' || (needs.build.result == 'skipped' && inputs.verify_run_id != '')) && (github.event_name == 'push' || (inputs.target == 'x86-64-vm' && inputs.preset == 'standard'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: firmware-${{ needs.plan.outputs.version }}-x86-64-vm-standard
+          path: dist
+          run-id: ${{ inputs.verify_run_id || github.run_id }}
+          github-token: ${{ github.token }}
+      - name: Boot and reboot checks
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends qemu-system-x86
+          python3 tests/verify_artifacts.py dist
+          image=$(find dist/images -maxdepth 1 -name '*squashfs-combined.img.gz' -print -quit)
+          test -n "$image"
+          gzip -dc "$image" > /tmp/firmware-boot.img
+          python3 tests/qemu_firmware_boot.py --image /tmp/firmware-boot.img --log qemu-firmware-boot.log
+      - name: Save verified firmware after a recheck
+        if: inputs.verify_run_id != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: verified-firmware-${{ needs.plan.outputs.version }}-x86-64-vm-standard
+          path: dist/**
+          retention-days: 14
+          if-no-files-found: error
+      - name: Upload boot diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: boot-diagnostics-x86-64-vm-standard
+          path: qemu-firmware-boot.log*
+          if-no-files-found: ignore
+          overwrite: true
+
+  release:
+    needs: [plan, build, boot]
+    if: always() && needs.build.result == 'success' && (needs.boot.result == 'success' || needs.boot.result == 'skipped') && (github.event_name == 'push' || inputs.release)
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
+          pattern: firmware-*
           path: artifacts
           merge-multiple: true
       - name: List assets
