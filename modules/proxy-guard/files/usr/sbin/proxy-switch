@@ -51,6 +51,40 @@ uci_enabled_key() {
 }
 
 set_enabled() {
+	if [ "$1" = homeproxy ]; then
+		# Match native LuCI controls while keeping selected exits available for
+		# a later explicit switch back. Never delete node/subscription sections.
+		hp_changed=0
+		for field in config.main_node routing.default_outbound server.enabled; do
+			value="$(uci -q get "homeproxy.$field" 2>/dev/null)"
+			saved="hp_saved_${field#*.}"
+			if [ "$2" = 0 ]; then
+				case "$field:$value" in
+					server.enabled:1) disabled=0 ;;
+					server.enabled:*) continue ;;
+					*:|*:nil) continue ;;
+					*) disabled=nil ;;
+				esac
+				uci -q set "proxy-guard.main.$saved=$value" || return 1
+				uci -q set "homeproxy.$field=$disabled" || return 1
+				hp_changed=1
+			else
+				case "$field:$value" in
+					server.enabled:1) continue ;;
+					server.enabled:*) ;;
+					*:|*:nil) ;;
+					*) continue ;;
+				esac
+				value="$(uci -q get "proxy-guard.main.$saved" 2>/dev/null)"
+				[ -n "$value" ] && [ "$value" != nil ] || continue
+				uci -q set "homeproxy.$field=$value" || return 1
+				hp_changed=1
+			fi
+		done
+		if [ "$hp_changed" = 1 ]; then
+			uci -q commit homeproxy && uci -q commit proxy-guard || return 1
+		fi
+	fi
 	key="$(uci_enabled_key "$1")"
 	[ -n "$key" ] || return 0
 	[ "$(uci -q get "$key" 2>/dev/null)" = "$2" ] && return 0

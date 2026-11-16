@@ -84,6 +84,15 @@ ensure_dirs() {
 
 STATE="$(uci -q get proxy-guard.main.state 2>/dev/null)"
 ACTIVE="$(uci -q get proxy-guard.main.active 2>/dev/null)"
+# HomeProxy's native client UI controls main_node/default_outbound rather than
+# the coordinator's enabled mirror. Synchronize only on its own apply event.
+if [ "$MODE" = "--event" ] && [ "${2:-}" = homeproxy ]; then
+	HP_ENABLED=0
+	homeproxy_configured && HP_ENABLED=1
+	if [ "$(uci -q get homeproxy.config.enabled 2>/dev/null)" != "$HP_ENABLED" ]; then
+		uci -q set "homeproxy.config.enabled=$HP_ENABLED" && uci -q commit homeproxy || exit 1
+	fi
+fi
 # Runtime events must respect the watchdog's recovery backoff. A reboot is
 # a fresh start; retry the saved choice rather than resuming a stale timer.
 [ "$STATE" = "failopen" ] && [ "$MODE" != "--boot" ] && exit 0

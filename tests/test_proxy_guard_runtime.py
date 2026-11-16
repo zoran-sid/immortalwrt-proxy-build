@@ -208,6 +208,27 @@ esac
             self.assertFalse(self.exists(active + ".link"))
             self.assertEqual((self.root / "state/proxy-guard.main.active").read_text(), "off")
 
+    def test_native_homeproxy_apply_enables_without_private_flag(self):
+        self.put("homeproxy.config.enabled", "0")
+        self.put("proxy-guard.main.active", "off")
+        self.run_script("proxy-guard-reconcile", "--event", "homeproxy")
+        self.assertTrue(self.exists("homeproxy.running"))
+        self.assertEqual((self.root / "state/homeproxy.config.enabled").read_text(), "1")
+
+    def test_native_homeproxy_disable_stops_and_clears_private_flag(self):
+        self.put("homeproxy.config.main_node", "nil")
+        self.put("homeproxy.running")
+        self.run_script("proxy-guard-reconcile", "--event", "homeproxy")
+        self.assertFalse(self.exists("homeproxy.running"))
+        self.assertEqual((self.root / "state/homeproxy.config.enabled").read_text(), "0")
+
+    def test_switch_away_preserves_native_exit_for_switch_back(self):
+        self.run_script("proxy-switch", "passwall")
+        self.assertEqual((self.root / "state/homeproxy.config.main_node").read_text(), "nil")
+        self.run_script("proxy-switch", "homeproxy")
+        self.assertEqual((self.root / "state/homeproxy.config.main_node").read_text(), "test-node")
+        self.assertTrue(self.exists("homeproxy.running"))
+
     def test_homeproxy_core_does_not_count_as_running_passwall(self):
         self.put("homeproxy.running")
         self.put("homeproxy.link")

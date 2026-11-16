@@ -8,7 +8,7 @@ service_triggers() {
 	procd_open_trigger
 	local package
 	for package in homeproxy passwall nikki openclash; do
-		procd_add_config_trigger "config.change" "$package" /usr/sbin/proxy-guard-reconcile --event
+		procd_add_config_trigger "config.change" "$package" /usr/sbin/proxy-guard-reconcile --event "$package"
 	done
 	procd_close_trigger
 }
