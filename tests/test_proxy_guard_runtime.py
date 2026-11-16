@@ -229,6 +229,14 @@ esac
         self.assertEqual((self.root / "state/homeproxy.config.main_node").read_text(), "test-node")
         self.assertTrue(self.exists("homeproxy.running"))
 
+    def test_ensure_does_not_restore_native_settings_edited_while_enabled(self):
+        self.put("homeproxy.server.enabled", "0")
+        self.put("proxy-guard.main.hp_saved_enabled", "1")
+        self.put("homeproxy.running")
+        self.run_script("proxy-switch", "--ensure", "homeproxy")
+        self.assertEqual((self.root / "state/homeproxy.server.enabled").read_text(), "0")
+        self.assertFalse((self.root / "commits").exists())
+
     def test_homeproxy_core_does_not_count_as_running_passwall(self):
         self.put("homeproxy.running")
         self.put("homeproxy.link")

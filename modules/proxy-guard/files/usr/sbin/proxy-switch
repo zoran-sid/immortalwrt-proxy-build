@@ -52,6 +52,11 @@ uci_enabled_key() {
 
 set_enabled() {
 	if [ "$1" = homeproxy ]; then
+		# Restore cached exits only on an actual enable transition. An ensure
+		# of an already enabled service must preserve native UI edits.
+		if [ "$2" = 1 ] && [ "$(uci -q get homeproxy.config.enabled 2>/dev/null)" = 1 ]; then
+			return 0
+		fi
 		# Match native LuCI controls while keeping selected exits available for
 		# a later explicit switch back. Never delete node/subscription sections.
 		hp_changed=0
